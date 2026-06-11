@@ -18,20 +18,24 @@ class CoCCameraController {
     this.bounds = { minX: -Infinity, maxX: Infinity, minZ: -Infinity, maxZ: Infinity };
 
     this._dragging = false;
+    this.hasDragged = false;
     this._last = new THREE.Vector2();
 
     // Mouse events
     this._onMouseDown = (e) => {
       if (!this.enabled || e.button !== 0) return; // left button pans
       this._dragging = true;
+      this.hasDragged = false;
       this.domElement.style.cursor = 'grabbing';
       this._last.set(e.clientX, e.clientY);
-      e.preventDefault();
     };
     this._onMouseMove = (e) => {
       if (!this.enabled || !this._dragging) return;
       const dx = e.clientX - this._last.x;
       const dy = e.clientY - this._last.y;
+      if (Math.hypot(dx, dy) > 2) {
+        this.hasDragged = true;
+      }
       this._pan(dx, dy);
       this._last.set(e.clientX, e.clientY);
     };
@@ -48,6 +52,7 @@ class CoCCameraController {
     this._touchState = { active: false, last: null, pinchDist: 0 };
     this._onTouchStart = (e) => {
       if (!this.enabled) return;
+      this.hasDragged = false;
       if (e.touches.length === 1) {
         const t = e.touches[0];
         this._touchState.active = true; this._touchState.last = { x: t.clientX, y: t.clientY };
@@ -62,9 +67,13 @@ class CoCCameraController {
         const t = e.touches[0];
         const dx = t.clientX - this._touchState.last.x;
         const dy = t.clientY - this._touchState.last.y;
+        if (Math.hypot(dx, dy) > 2) {
+          this.hasDragged = true;
+        }
         this._pan(dx, dy);
         this._touchState.last = { x: t.clientX, y: t.clientY };
       } else if (e.touches.length === 2) {
+        this.hasDragged = true;
         const d = this._touchDistance(e.touches[0], e.touches[1]);
         const delta = d - this._touchState.pinchDist;
         this._touchState.pinchDist = d;
@@ -170,14 +179,9 @@ class City3DGame {
   // Street lights
   this.streetLightPoints = [];
   this.streetLightNightIntensity = 1.35;
-  this.streetLightHalos = [];
-  this.streetLightBeams = [];
   // Simulation speed control (0 = paused, 1/2/3 = normal/2x/3x)
   this.timeScale = 1;
   this._lastLevel = 1;
-  // (River functionality removed)
-  // Water toggle state
-  this.water = { enabled: false, mesh: null, material: null, uniforms: null };
 
     this._initThree();
     this._initScene();
@@ -187,10 +191,6 @@ class City3DGame {
 
     // Gentle welcome feed if feed panel exists
     this._feed('Welcome to City Simulator');
-    // Initialize time-of-day from local time
-    this._updateTimezoneLabel();
-    this._autoSetTimeOfDay();
-    this._applyTimeOfDay(this.timeOfDay);
   }
 
   introCinematic() {
@@ -307,14 +307,11 @@ class City3DGame {
   this.popTextEl = document.getElementById('popText') || null;
   this.happyTextEl = document.getElementById('happyText') || null;
   this.levelTextEl = document.getElementById('levelText') || null;
-  this.tzTextEl = document.getElementById('tzText') || null;
   // Right panel stat refs (optional, if present)
   this.stat = {
     population: document.getElementById('statPopulation') || null,
     happiness: document.getElementById('statHappiness') || null,
     level: document.getElementById('statLevel') || null,
-    income: document.getElementById('statIncome') || null,
-    income2: document.getElementById('statIncome2') || null,
     coins: document.getElementById('statCoins') || null,
   };
   // Speed buttons (optional)
@@ -324,16 +321,9 @@ class City3DGame {
     x2: document.getElementById('btn2x') || null,
     x3: document.getElementById('btn3x') || null,
   };
-  // Toggle day/night button
-  this.toggleDayNightBtn = document.getElementById('toggleDayNightBtn') || null;
-  if (this.toggleDayNightBtn) this.toggleDayNightBtn.addEventListener('click', ()=>{
-    const next = this.timeOfDay === 'day' ? 'night' : 'day';
-    this._applyTimeOfDay(next, true);
-  });
   this.getCoinsBtn = document.getElementById('getCoinsBtn') || null;
   this.buyBuildingBtn = document.getElementById('buyBuildingBtn') || null;
   this.expandCityBtn = document.getElementById('expandCityBtn') || null;
-  this.toggleWaterBtn = document.getElementById('toggleRiverBtn') || null;
     // Store buttons
     this.ui = {
       buyRoad: document.getElementById('buyRoad'),
@@ -341,7 +331,6 @@ class City3DGame {
       buyTower: document.getElementById('buyTower'),
       buyFactory: document.getElementById('buyFactory'),
       buyPark: document.getElementById('buyPark'),
-      buyWater: document.getElementById('buyWater'),
       cancelPlacement: document.getElementById('cancelPlacement')
     };
 
@@ -364,9 +353,6 @@ class City3DGame {
         this._updateUI();
       });
     }
-    if (this.toggleWaterBtn) {
-      this.toggleWaterBtn.addEventListener('click', () => this._toggleWater());
-    }
 
   // Hook store selections
   this._hookStore('buyRoad', { type: 'road', cost: 5 });
@@ -374,7 +360,6 @@ class City3DGame {
   this._hookStore('buyTower', { type: 'tower', cost: 75 });
   this._hookStore('buyFactory', { type: 'factory', cost: 100 });
   this._hookStore('buyPark', { type: 'park', cost: 30 });
-  this._hookStore('buyWater', { type: 'water', cost: 0 });
   if (this.ui.cancelPlacement) this.ui.cancelPlacement.addEventListener('click', () => this._cancelPlacement());
 
   // Mouse interactions for placement and moving
@@ -448,7 +433,7 @@ class City3DGame {
 
   _onClick(event) {
     // Place selected type or confirm relocation
-    if (this.controls && this.controls._dragging) return; // avoid placing while panning
+    if (this.controls && this.controls.hasDragged) return; // avoid placing while panning
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -481,11 +466,7 @@ class City3DGame {
         this._removePeopleForPark(mesh);
         this._spawnPeopleForPark(mesh, row, col);
       }
-      // If moving water, refresh water textures for old and new locations
-      if (mesh.userData.type === 'water') {
-        if (prev) this._refreshWaterAtAndNeighbors(prev.row, prev.col);
-        this._refreshWaterAtAndNeighbors(row, col);
-      }
+
       this.isRelocating = null;
       this._recomputeCityStats();
       this._feed('Building moved');
@@ -497,22 +478,7 @@ class City3DGame {
   if (this.grid[row][col]) return; // occupied
     if (this.coins < this.currentPlacement.cost) return; // not enough coins
 
-    // If water, place only the selected cell (cartoonish, per-block)
-  if (this.currentPlacement.type === 'water') {
-      const m = this._createBuildingMesh('water');
-      const pos2 = this._gridToWorld(col, row);
-      m.position.set(pos2.x, m.position.y, pos2.z);
-      m.userData = { type: 'water', grid: { col, row } };
-      this.scene.add(m);
-      this.buildings.push(m);
-      this.grid[row][col] = m;
-      this._refreshWaterAtAndNeighbors(row, col);
-      // Water is free; no coins deducted
-      this._recomputeCityStats();
-      this._updateUI();
-      this._feed('Placed water');
-      return;
-    }
+
 
     const mesh = this._createBuildingMesh(this.currentPlacement.type);
     const pos = this._gridToWorld(col, row);
@@ -530,9 +496,7 @@ class City3DGame {
     if (mesh.userData.type === 'park') {
       this._spawnPeopleForPark(mesh, row, col);
     }
-    if (mesh.userData.type === 'water') {
-      this._refreshWaterAtAndNeighbors(row, col);
-    }
+
     // Water: no coin cost; acts as decorative tile
     this._recomputeCityStats();
     this._updateUI();
@@ -633,19 +597,7 @@ class City3DGame {
         trunk.castShadow = true; leaves.castShadow = true; leaves.receiveShadow = true;
         mesh.add(trunk); mesh.add(leaves);
       }
-    } else if (type === 'water') {
-      const hWater = this.cellSize * 0.02;
-      const geoW = new THREE.BoxGeometry(this.cellSize * 1.0, hWater, this.cellSize * 1.0);
-      const topMat = ghost
-        ? new THREE.MeshStandardMaterial({ color: 0x2aa6b8, roughness: 0.6, metalness: 0.2, opacity: 0.5, transparent: true })
-        : this._getRealWaterMaterial();
-      const sideMat = ghost
-        ? new THREE.MeshStandardMaterial({ color: 0x0f1b24, roughness: 1.0, metalness: 0.0, opacity: 0.6, transparent: true })
-        : this._getRealWaterSideMaterial();
-      const mats = [sideMat, sideMat, topMat, sideMat, sideMat, sideMat];
-      mesh = new THREE.Mesh(geoW, mats);
-      mesh.position.y = hWater / 2 + 0.001;
-      mesh.receiveShadow = false; mesh.castShadow = false;
+
     } else {
       // buildings with windowed facades and roof top
       geo = new THREE.BoxGeometry(this.cellSize * 0.9, h, this.cellSize * 0.9);
@@ -701,356 +653,6 @@ class City3DGame {
     return mesh;
   }
 
-  _ensureWaterShader() {
-    if (this._waterShader) return this._waterShader;
-    const uniforms = {
-      uTime: { value: 0 },
-      uDeepColor: { value: new THREE.Color(0x0a2740) },
-      uShallowColor: { value: new THREE.Color(0x2aa6b8) },
-      uSpecularColor: { value: new THREE.Color(0xffffff) },
-      uLightDir: { value: new THREE.Vector3(0.3, 0.9, 0.2).normalize() },
-      uFlowDir: { value: new THREE.Vector2(1.0, 0.15).normalize() },
-    };
-    // Tile-local, cartoonish water shader (no vertex displacement)
-    const vert = `
-      varying vec2 vUv;
-      void main(){
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `;
-    const frag = `
-      precision highp float;
-      uniform float uTime;
-      uniform vec3 uDeepColor;
-      uniform vec3 uShallowColor;
-      uniform vec3 uSpecularColor;
-      uniform vec3 uLightDir;
-      uniform vec2 uFlowDir;
-      varying vec2 vUv;
-      
-      // Stylized flow pattern in local tile UV space
-      float flowField(vec2 uv, float t){
-        vec2 p = uv * 8.0; // scale up inside the tile
-        float a = sin(dot(p, vec2(1.0, 0.4)) + t*1.6);
-        float b = sin(dot(p, vec2(-0.6, 1.2)) + t*1.1);
-        return 0.5 + 0.5 * a * b;
-      }
-      
-      void main(){
-        vec2 uv = vUv + uFlowDir * (uTime * 0.08);
-        float f = flowField(uv, uTime);
-        // Base color toon blend
-        float tone = smoothstep(0.35, 0.85, f);
-        vec3 base = mix(uDeepColor, uShallowColor, tone);
-        // Light banding (3 bands)
-        float lambert = dot(normalize(vec3(0.0,1.0,0.0)), normalize(uLightDir));
-        lambert = floor(clamp(lambert, 0.0, 1.0) * 3.0) / 3.0;
-        base *= 0.85 + 0.15 * lambert;
-        // Specular streaks along flow lines
-        float streak = sin((vUv.x*24.0) * uFlowDir.x + (vUv.y*24.0) * uFlowDir.y + uTime*3.0);
-        float spec = smoothstep(0.88, 1.0, streak) * 0.18;
-        vec3 color = base + uSpecularColor * spec;
-        gl_FragColor = vec4(color, 0.9);
-      }
-    `;
-    this._waterShader = { uniforms, vert, frag };
-    return this._waterShader;
-  }
-
-  _getSharedWaterMaterial() {
-    if (this._waterMaterial) return this._waterMaterial;
-    const { uniforms, vert, frag } = this._ensureWaterShader();
-    this._waterMaterial = new THREE.ShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag, transparent: true, depthWrite: false });
-    return this._waterMaterial;
-  }
-
-  _getWorldWaterMaterial() {
-    if (this._waterWorldMat) return this._waterWorldMat;
-    this._waterWorldUniforms = {
-      uTime: { value: 0 },
-      uCellSize: { value: this.cellSize },
-      uPxPerCell: { value: 32.0 },
-      uDark: { value: new THREE.Color(0x1b3c73) },
-      uMid: { value: new THREE.Color(0x215b9a) },
-      uLight: { value: new THREE.Color(0x2fa4e7) },
-      uFlowDir: { value: new THREE.Vector2(1.0, 0.2).normalize() },
-    };
-    const vert = `
-      varying vec3 vWorldPos;
-      void main(){
-        vec4 wp = modelMatrix * vec4(position,1.0);
-        vWorldPos = wp.xyz;
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }
-    `;
-    const frag = `
-      precision highp float;
-      varying vec3 vWorldPos;
-      uniform float uTime;
-      uniform float uCellSize;
-      uniform float uPxPerCell;
-      uniform vec3 uDark, uMid, uLight;
-      uniform vec2 uFlowDir;
-      
-      vec3 palette(float t){
-        return mix(uDark, mix(uMid, uLight, smoothstep(0.5, 1.0, t)), smoothstep(0.2, 0.8, t));
-      }
-      
-      void main(){
-        vec2 tile = vWorldPos.xz / uCellSize; // world in tile units
-        vec2 flow = tile + uFlowDir * (uTime * 0.12);
-        // Pixelate in world space: 32 px per cell
-        vec2 pix = floor(flow * uPxPerCell) / uPxPerCell;
-        float a = sin(dot(pix, vec2(1.0, 0.37)) * 6.2831);
-        float b = sin(dot(pix, vec2(-0.6, 1.21)) * 6.2831);
-        float t = 0.5 + 0.5 * a * b;
-        // Add soft foam bands
-        float foam = smoothstep(0.95, 1.0, sin((pix.x+pix.y)*12.0 + uTime*1.6));
-        vec3 col = palette(t);
-        col += foam * 0.08;
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `;
-    this._waterWorldMat = new THREE.ShaderMaterial({
-      uniforms: this._waterWorldUniforms,
-      vertexShader: vert,
-      fragmentShader: frag,
-      transparent: false,
-      depthWrite: true,
-    });
-    return this._waterWorldMat;
-  }
-
-  _getRealWaterMaterial() {
-    if (this._realWaterMat) return this._realWaterMat;
-    this._realWaterUniforms = {
-      uTime: { value: 0 },
-  uFlowDir: { value: new THREE.Vector2(0.0, 1.0).normalize() },
-      uDeepColor: { value: new THREE.Color(0x0a2a42) },
-      uShallowColor: { value: new THREE.Color(0x2a9fd6) },
-      uFoamColor: { value: new THREE.Color(0xf0fafc) },
-      uSkyTop: { value: new THREE.Color(0x151826) },
-      uSkyBottom: { value: new THREE.Color(0x0e0f14) },
-      uLightDir: { value: new THREE.Vector3(0.3, 0.9, 0.2).normalize() },
-      uSpecular: { value: 0.7 },
-      uShininess: { value: 120.0 },
-      uWaveAmp: { value: 0.04 },
-      uWaveFreq: { value: 2.4 },
-      uWaveMix: { value: 0.6 },
-      uLineIntensity: { value: 0.32 },
-      uLineWidth: { value: 0.10 },
-      uLineFreq: { value: 2.4 },
-      uLineSpeed: { value: 0.9 },
-      uDotFreq: { value: 1.6 },
-      uDotDuty: { value: 0.35 },
-      uDotSoft: { value: 0.08 },
-    };
-    const vert = `
-      varying vec3 vWorldPos;
-      void main(){
-        vec4 wp = modelMatrix * vec4(position,1.0);
-        vWorldPos = wp.xyz;
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }
-    `;
-    const frag = `
-      precision highp float;
-      varying vec3 vWorldPos;
-      uniform float uTime;
-      uniform vec2 uFlowDir;
-      uniform vec3 uDeepColor, uShallowColor, uFoamColor;
-      uniform vec3 uSkyTop, uSkyBottom;
-      uniform vec3 uLightDir;
-      uniform float uSpecular, uShininess;
-  uniform float uWaveAmp, uWaveFreq, uWaveMix;
-  uniform float uLineIntensity, uLineWidth, uLineFreq, uLineSpeed;
-  uniform float uDotFreq, uDotDuty, uDotSoft;
-
-      // Two-direction wave field
-      float wave(vec2 p, vec2 dir, float freq, float speed){
-        float ph = dot(p, normalize(dir)) * freq + uTime * speed;
-        return sin(ph);
-      }
-      
-      vec3 normalFromWaves(vec2 p){
-        float f1 = wave(p, uFlowDir, uWaveFreq, 1.2);
-        float f2 = wave(p, vec2(-uFlowDir.y, uFlowDir.x), uWaveFreq*1.7, 1.6);
-        float h = (f1 * uWaveMix + f2 * (1.0 - uWaveMix)) * uWaveAmp;
-        // Finite difference gradient
-        float eps = 0.25;
-        float hdx = ((wave(p+vec2(eps,0.0), uFlowDir, uWaveFreq, 1.2)*uWaveMix + wave(p+vec2(eps,0.0), vec2(-uFlowDir.y, uFlowDir.x), uWaveFreq*1.7, 1.6)*(1.0-uWaveMix)) * uWaveAmp) - h;
-        float hdz = ((wave(p+vec2(0.0,eps), uFlowDir, uWaveFreq, 1.2)*uWaveMix + wave(p+vec2(0.0,eps), vec2(-uFlowDir.y, uFlowDir.x), uWaveFreq*1.7, 1.6)*(1.0-uWaveMix)) * uWaveAmp) - h;
-        vec3 n = normalize(vec3(-hdx, 1.0, -hdz));
-        return n;
-      }
-
-      vec3 skyColor(vec3 rd){
-        float t = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-        return mix(uSkyBottom, uSkyTop, t);
-      }
-
-  float hash1(float n){ return fract(sin(n*127.1)*43758.5453); }
-  float noise1(float x){ float i=floor(x); float f=fract(x); float a=hash1(i); float b=hash1(i+1.0); float u=f*f*(3.0-2.0*f); return mix(a,b,u); }
-
-      void main(){
-        vec3 V = normalize(cameraPosition - vWorldPos);
-        vec2 pw = vWorldPos.xz * 0.25; // world scale
-        vec3 N = normalFromWaves(pw);
-        vec3 L = normalize(uLightDir);
-        
-        // Fresnel
-        float NoV = clamp(dot(N, V), 0.0, 1.0);
-        float F = pow(1.0 - NoV, 5.0);
-        
-        // Base water color
-        float cMix = 0.55 + 0.45 * NoV; // view-dependent deepness
-        vec3 base = mix(uDeepColor, uShallowColor, cMix);
-        
-        // Reflection from sky
-        vec3 R = reflect(-V, N);
-        vec3 env = skyColor(R);
-        
-        // Specular
-        vec3 H = normalize(L + V);
-        float spec = pow(max(dot(N, H), 0.0), uShininess) * uSpecular;
-        
-        // Foam on peaks
-        float foam = smoothstep(0.75, 1.0, N.y);
-
-  // Vertical-oriented flow lines with strong randomness (Voronoi-like spacing)
-  vec2 dir = normalize(uFlowDir);
-  vec2 perp = vec2(-dir.y, dir.x);
-  float sBase = dot(pw, dir);
-  float qBase = dot(pw, perp) * uLineFreq;
-  // Low-frequency wobble driven by flow
-  qBase += (noise1(sBase*0.7 + 10.0) - 0.5) * 0.5;
-  float iCell = floor(qBase);
-  // Jittered feature points for 1D Voronoi spacing
-  float p0 = iCell + 0.5 + (hash1(iCell*19.0) - 0.5) * 0.7;
-  float p1 = iCell + 1.5 + (hash1((iCell+1.0)*19.0) - 0.5) * 0.7;
-  float d0 = abs(qBase - p0);
-  float d1 = abs(qBase - p1);
-  float nearestIdx = (d0 < d1) ? iCell : (iCell + 1.0);
-  float d = min(d0, d1);
-  float width = uLineWidth * mix(0.5, 1.8, hash1(nearestIdx + 13.0));
-  float stripe = 1.0 - smoothstep(width, width + 0.025, d);
-  // Random per-line speed/intensity
-  float speedMul = mix(0.6, 1.4, hash1(nearestIdx + 77.0));
-  float intensityMul = mix(0.4, 1.35, hash1(nearestIdx + 10.0));
-  // Dotted pattern along flow axis with per-line frequency and per-dot randomness
-  float lineDotFreq = uDotFreq * mix(0.7, 1.5, hash1(nearestIdx + 291.0));
-  float sCoord = sBase * lineDotFreq + uTime * uLineSpeed * speedMul;
-  float dotIndex = floor(sCoord);
-  float rDot = hash1(nearestIdx*17.0 + dotIndex*131.0);
-  float duty = clamp(uDotDuty * mix(0.4, 1.6, rDot), 0.05, 0.9);
-  float soft = uDotSoft * mix(0.6, 1.4, hash1(dotIndex + nearestIdx*31.0));
-  float sd = abs(fract(sCoord) - 0.5);
-  float dots = 1.0 - smoothstep(duty * 0.5, duty * 0.5 + soft, sd);
-  stripe *= dots;
-  // Randomly drop some lines entirely to avoid uniformity
-  float present = step(0.12, hash1(nearestIdx + 999.0));
-  stripe *= present;
-  // Subtle wobble for organic look
-  float wobble = 0.65 + 0.35 * sin((qBase) * 6.2831 + uTime * 1.1 + hash1(nearestIdx + 55.0) * 6.2831);
-  stripe *= wobble;
-        
-        vec3 col = mix(base, env, F * 0.85);
-        col += spec * (0.35 + 0.65*F);
-        col = mix(col, uFoamColor, foam * 0.08);
-        // Blend in animated white flow lines with per-line intensity
-        col = mix(col, uFoamColor, stripe * uLineIntensity * intensityMul);
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `;
-    this._realWaterMat = new THREE.ShaderMaterial({
-      uniforms: this._realWaterUniforms,
-      vertexShader: vert,
-      fragmentShader: frag,
-      transparent: false,
-      depthWrite: true,
-    });
-    return this._realWaterMat;
-  }
-
-  _getRealWaterSideMaterial() {
-    if (this._realWaterSideMat) return this._realWaterSideMat;
-    this._realWaterSideMat = new THREE.MeshStandardMaterial({ color: 0x0f1b24, roughness: 0.95, metalness: 0.0 });
-    return this._realWaterSideMat;
-  }
-
-  _ensureMinecraftWaterTextures() {
-    if (this._waterTexTop && this._waterTexSide) return;
-    // Create pixel-art top texture (32x32)
-    const size = 32;
-    const c = document.createElement('canvas'); c.width = c.height = size;
-    const ctx = c.getContext('2d');
-    // Disable smoothing when scaling
-    ctx.imageSmoothingEnabled = false;
-    const dark = '#1b3c73';
-    const mid = '#215b9a';
-    const light = '#2fa4e7';
-    for (let y=0;y<size;y++){
-      for (let x=0;x<size;x++){
-        const v = ((x + y) % 8);
-        const col = v<2 ? light : v<5 ? mid : dark;
-        ctx.fillStyle = col; ctx.fillRect(x, y, 1, 1);
-      }
-    }
-    const texTop = new THREE.CanvasTexture(c);
-    texTop.wrapS = texTop.wrapT = THREE.RepeatWrapping;
-    texTop.magFilter = THREE.NearestFilter; texTop.minFilter = THREE.NearestFilter;
-    texTop.repeat.set(1,1);
-    texTop.needsUpdate = true;
-
-    // Side texture with vertical bands
-    const cs = document.createElement('canvas'); cs.width = cs.height = size;
-    const ctxs = cs.getContext('2d'); ctxs.imageSmoothingEnabled = false;
-    for (let y=0;y<size;y++){
-      for (let x=0;x<size;x++){
-        const v = (x % 6);
-        const col = v<2 ? light : v<4 ? mid : dark;
-        ctxs.fillStyle = col; ctxs.fillRect(x, y, 1, 1);
-      }
-    }
-    const texSide = new THREE.CanvasTexture(cs);
-    texSide.wrapS = texSide.wrapT = THREE.RepeatWrapping;
-    texSide.magFilter = THREE.NearestFilter; texSide.minFilter = THREE.NearestFilter;
-    texSide.repeat.set(1,1);
-    texSide.needsUpdate = true;
-
-    this._waterTexTop = texTop;
-    this._waterTexSide = texSide;
-  }
-
-  _getMinecraftWaterTopMaterial() {
-    if (this._waterMatTop) return this._waterMatTop;
-    this._ensureMinecraftWaterTextures();
-    this._waterMatTop = new THREE.MeshStandardMaterial({
-      map: this._waterTexTop,
-      color: 0xffffff,
-      transparent: false,
-      opacity: 1.0,
-      roughness: 0.7,
-      metalness: 0.1,
-    });
-    return this._waterMatTop;
-  }
-
-  _getMinecraftWaterSideMaterial() {
-    if (this._waterMatSide) return this._waterMatSide;
-    this._ensureMinecraftWaterTextures();
-    this._waterMatSide = new THREE.MeshStandardMaterial({
-      map: this._waterTexSide,
-      color: 0xffffff,
-      transparent: false,
-      opacity: 1.0,
-      roughness: 0.9,
-      metalness: 0.0,
-    });
-    return this._waterMatSide;
-  }
-
   _emitSmoke(originMesh) {
     // Create a soft billboarded puff that rises and fades
     const size = 128; const c = document.createElement('canvas'); c.width=c.height=size; const ctx=c.getContext('2d');
@@ -1074,33 +676,23 @@ class City3DGame {
     const makeTex = (m) => {
       const size = 256; const c = document.createElement('canvas'); c.width = c.height = size; const ctx = c.getContext('2d');
       // Asphalt base
-      ctx.fillStyle = '#1f2329'; ctx.fillRect(0,0,size,size);
-      // Noise
-      for (let i=0;i<900;i++){ const x=(Math.random()*size)|0, y=(Math.random()*size)|0; const a=0.06+Math.random()*0.07; ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(x,y,1,1);}    
-      const drawVertEdges = () => {
-        ctx.fillStyle = '#e8eef7'; const edgeOffset=34, edgeWidth=6;
-        ctx.fillRect(edgeOffset, 0, edgeWidth, size);
-        ctx.fillRect(size-edgeOffset-edgeWidth, 0, edgeWidth, size);
-      };
-      const drawHorzEdges = () => {
-        ctx.fillStyle = '#e8eef7'; const edgeOffset=34, edgeWidth=6;
-        ctx.fillRect(0, edgeOffset, size, edgeWidth);
-        ctx.fillRect(0, size-edgeOffset-edgeWidth, size, edgeWidth);
-      };
+      ctx.fillStyle = '#1e2127'; ctx.fillRect(0,0,size,size);
       const drawVertDash = () => {
-        const dashW=10, dashH=30, gap=24, cx=size/2-dashW/2; ctx.fillStyle='#e8eef7';
-        for (let y=10; y<size-10; y+=dashH+gap) ctx.fillRect(cx,y,dashW,dashH);
+        const dashW = 4, dashH = 24, gap = 16, cx = size/2 - dashW/2;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+        for (let y = 8; y < size - 8; y += dashH + gap) ctx.fillRect(cx, y, dashW, dashH);
       };
       const drawHorzDash = () => {
-        const dashW=30, dashH=10, gap=24, cy=size/2-dashH/2; ctx.fillStyle='#e8eef7';
-        for (let x=10; x<size-10; x+=dashW+gap) ctx.fillRect(x,cy,dashW,dashH);
+        const dashW = 24, dashH = 4, gap = 16, cy = size/2 - dashH/2;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+        for (let x = 8; x < size - 8; x += dashW + gap) ctx.fillRect(x, cy, dashW, dashH);
       };
       const N=1,E=2,S=4,W=8; const vert = (m & N) || (m & S); const horz = (m & E) || (m & W);
       if (!vert && !horz) { // default single tile vertical
-        drawVertEdges(); drawVertDash();
+        drawVertDash();
       } else {
-        if (vert) { drawVertEdges(); drawVertDash(); }
-        if (horz) { drawHorzEdges(); drawHorzDash(); }
+        if (vert) { drawVertDash(); }
+        if (horz) { drawHorzDash(); }
       }
       const tex = new THREE.CanvasTexture(c); tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.needsUpdate = true; return tex;
     };
@@ -1182,12 +774,6 @@ class City3DGame {
           const idx = this.streetLightPoints.indexOf(x);
           if (idx >= 0) this.streetLightPoints.splice(idx, 1);
         }
-        if (x.isMesh) {
-          const hi = this.streetLightHalos.indexOf(x);
-          if (hi >= 0) this.streetLightHalos.splice(hi, 1);
-          const bi = this.streetLightBeams.indexOf(x);
-          if (bi >= 0) this.streetLightBeams.splice(bi, 1);
-        }
       });
       roadMesh.remove(n);
     }
@@ -1213,7 +799,7 @@ class City3DGame {
       lamp.position.set(lx, yBase, lz);
       lamp.userData.kind = 'streetlight';
       roadMesh.add(lamp);
-      // Spot-like light: use PointLight for perf, but add a small cone mesh to indicate throw direction
+      // Spot-like light: use PointLight for perf
       const intensity = this.timeOfDay==='night'? this.streetLightNightIntensity : 0.1;
       const p = new THREE.PointLight(0xfff2b6, intensity, this.cellSize * 2.6, 1.6);
       p.position.set(lx, yBase + this.cellSize*0.9, lz);
@@ -1225,29 +811,6 @@ class City3DGame {
       const dirYaw = this._yawForDir(faceDir);
       // The arm runs along +Z from the pole; rotate pole so arm points into the road
       lamp.rotation.y = dirYaw;
-      // Ground halo to show pool of light
-      const halo = this._createStreetLightHalo(this.cellSize * 0.8);
-      halo.position.set(lx, 0.02, lz);
-      halo.userData.kind = 'streetlight';
-      halo.material.opacity = this.timeOfDay==='night' ? 0.5 : 0.08;
-      roadMesh.add(halo);
-      this.streetLightHalos.push(halo);
-      // Visible beam cone (cheap volumetric feel)
-      const beam = this._createStreetLightBeam(this.cellSize*0.22, this.cellSize*1.2);
-      // Attach beam to the lamp's head anchor if present to inherit rotation
-      const anchor = lamp.getObjectByName('lampAnchor');
-      if (anchor) {
-        beam.position.set(0, -this.cellSize*0.02, 0);
-        anchor.add(beam);
-      } else {
-        // Fallback: add to road mesh at lamp position and rotate by dir
-        beam.position.set(lx, yBase + this.cellSize*0.8, lz);
-        beam.rotation.y = dirYaw;
-        roadMesh.add(beam);
-      }
-      beam.userData.kind = 'streetlight';
-      beam.material.opacity = this.timeOfDay==='night' ? 0.18 : 0.0;
-      this.streetLightBeams.push(beam);
     };
 
     const placeStraight = (dir) => {
@@ -1332,98 +895,40 @@ class City3DGame {
   }
 
   _createStreetLightMesh() {
-    const poleH = this.cellSize * 1.45;
-    const poleRTop = this.cellSize * 0.024;
-    const poleRBot = this.cellSize * 0.036;
-    const armLen = this.cellSize * 0.34;
+    const poleH = this.cellSize * 1.25;
+    const poleR = this.cellSize * 0.015;
+    const armLen = this.cellSize * 0.2;
 
-    const poleMat = new THREE.MeshStandardMaterial({ color: 0x9aa2ad, roughness: 0.55, metalness: 0.5 });
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(poleRTop, poleRBot, poleH, 16), poleMat);
-    pole.castShadow = false; pole.receiveShadow = true;
-    pole.position.y = poleH/2;
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x22252a, roughness: 0.6, metalness: 0.8 });
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(poleR, poleR, poleH, 8), poleMat);
+    pole.position.y = poleH / 2;
+    pole.castShadow = false; pole.receiveShadow = false;
 
-    // Base flange at ground
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(poleRBot*1.4, poleRBot*1.4, this.cellSize*0.04, 16), new THREE.MeshStandardMaterial({ color: 0x808791, roughness: 0.8, metalness: 0.2 }));
-    base.position.y = this.cellSize*0.02;
-    pole.add(base);
-
-    // Straight arm with small brace
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(poleRTop*0.7, poleRTop*0.7, armLen, 12), poleMat);
-    arm.rotation.z = Math.PI/2;
-    arm.position.set(0, poleH * 0.86, armLen/2);
+    // Sleek arm attached near the top of the pole
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(poleR * 0.7, poleR * 0.7, armLen, 8), poleMat);
+    arm.rotation.z = Math.PI / 2;
+    arm.position.set(0, poleH * 0.45, armLen / 2);
     pole.add(arm);
 
-    const brace = new THREE.Mesh(new THREE.CylinderGeometry(poleRTop*0.55, poleRTop*0.55, this.cellSize*0.22, 10), poleMat);
-    brace.rotation.set(Math.PI/6, 0, Math.PI/2);
-    brace.position.set(0, poleH*0.82, armLen*0.35);
-    pole.add(brace);
-
-    // Head group (housing + hood + glass + bulb), attached at arm tip using an anchor
+    // Simple head with anchor for bulb
     const anchor = new THREE.Object3D();
     anchor.name = 'lampAnchor';
-    anchor.position.set(0, 0, armLen/2);
+    anchor.position.set(0, 0, armLen / 2);
     arm.add(anchor);
 
-    const headGroup = new THREE.Group();
-    anchor.add(headGroup);
-    // Housing (rectangular body)
-    const bodySize = { x: this.cellSize*0.14, y: this.cellSize*0.06, z: this.cellSize*0.20 };
-    const housing = new THREE.Mesh(new THREE.BoxGeometry(bodySize.x, bodySize.y, bodySize.z), new THREE.MeshStandardMaterial({ color: 0x666c75, roughness: 0.6, metalness: 0.5 }));
-    housing.position.set(0, 0, 0);
-    headGroup.add(housing);
-    // Hood (thin cone cap), facing downwards
-    const hood = new THREE.Mesh(new THREE.ConeGeometry(bodySize.x*0.65, bodySize.y*0.6, 12), new THREE.MeshStandardMaterial({ color: 0x545b63, roughness: 0.7, metalness: 0.4 }));
-    hood.rotation.x = Math.PI; // point down
-    hood.position.set(0, -bodySize.y*0.55, 0);
-    headGroup.add(hood);
-    // Glass lens
-    const glass = new THREE.Mesh(new THREE.CircleGeometry(bodySize.x*0.5, 24), new THREE.MeshStandardMaterial({ color: 0xfff7e0, transparent: true, opacity: 0.35, roughness: 0.15, metalness: 0.0 }));
-    glass.rotation.x = -Math.PI/2;
-    glass.position.set(0, -bodySize.y*0.35, 0);
-    headGroup.add(glass);
-    // Bulb (emissive)
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(this.cellSize*0.03, 14, 14), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff0c0, emissiveIntensity: this.timeOfDay==='night'? 1.4 : 0.05, roughness: 0.2, metalness: 0.0 }));
-    bulb.position.set(0, -bodySize.y*0.2, 0);
-    headGroup.add(bulb);
-
-    // Slight tilt of head downward
-    headGroup.rotation.x = -Math.PI/8;
+    const bulb = new THREE.Mesh(
+      new THREE.SphereGeometry(this.cellSize * 0.035, 8, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0xfff0c0,
+        emissiveIntensity: this.timeOfDay === 'night' ? 2.0 : 0.1,
+        roughness: 0.1
+      })
+    );
+    bulb.position.set(0, -this.cellSize * 0.025, 0);
+    anchor.add(bulb);
 
     return pole;
-  }
-
-  _createStreetLightHalo(size) {
-    const s = 128;
-    const c = document.createElement('canvas');
-    c.width = c.height = s;
-    const ctx = c.getContext('2d');
-    const g = ctx.createRadialGradient(s/2, s/2, s*0.1, s/2, s/2, s*0.5);
-    g.addColorStop(0, 'rgba(255,240,200,0.7)');
-    g.addColorStop(1, 'rgba(255,240,200,0.0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(s/2, s/2, s*0.5, 0, Math.PI*2);
-    ctx.fill();
-    const tex = new THREE.CanvasTexture(c);
-    tex.magFilter = THREE.LinearFilter;
-    tex.minFilter = THREE.LinearMipMapLinearFilter;
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false, opacity: 0.5 });
-    const geo = new THREE.PlaneGeometry(size, size, 1, 1);
-    geo.rotateX(-Math.PI/2);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.renderOrder = 1; // draw on top of ground slightly
-    return mesh;
-  }
-
-  _createStreetLightBeam(radius, height) {
-    const geo = new THREE.ConeGeometry(radius, height, 24, 1, true);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.BackSide, toneMapped: false });
-    const mesh = new THREE.Mesh(geo, mat);
-    // Point tip at the bulb and open downwards
-    mesh.rotation.x = -Math.PI/2; // align cone along +Z
-    // Tilt slightly downward; additional yaw is applied by parent
-    mesh.rotation.z = 0;
-    return mesh;
   }
 
   _addBuilding() {
@@ -1483,9 +988,6 @@ class City3DGame {
     if (this.stat.happiness) this.stat.happiness.textContent = `${Math.round(this.happiness*100)}%`;
     if (this.stat.level) this.stat.level.textContent = `${this.level}`;
     if (this.stat.coins) this.stat.coins.textContent = `${this.coins}`;
-  const inc = this._estimateIncomePerSecond();
-  if (this.stat.income) this.stat.income.textContent = `${inc}/s`;
-  if (this.stat.income2) this.stat.income2.textContent = `${inc}/s`;
     if (this.buyBuildingBtn) {
       const cityFull = this.buildings.length >= this.gridSize * this.gridSize;
       const canBuyHouse = this.coins >= 50 && !cityFull;
@@ -1500,8 +1002,7 @@ class City3DGame {
   }
 
   _estimateIncomePerSecond() {
-    const perSecond = Math.floor(this.population * (0.1 + 0.9 * this.happiness) * 0.2);
-    return perSecond;
+    return 0;
   }
 
   _recomputeCityStats() {
@@ -1645,15 +1146,7 @@ class City3DGame {
       }
     }
 
-    // Refresh water textures for new adjacency
-    for (let r = 0; r < this.gridSize; r++) {
-      for (let c = 0; c < this.gridSize; c++) {
-        if (this._isWaterCell(r, c)) {
-          const m = this.grid[r][c];
-          if (m) this._applyWaterTexture(m, r, c);
-        }
-      }
-    }
+
 
     // Shift cars by +1 cell and update indices
     for (const car of this.cars) {
@@ -1671,7 +1164,7 @@ class City3DGame {
     this.controls.setBounds({ minX: -4, maxX: planeSize + 4, minZ: -4, maxZ: planeSize + 4 });
     this.controls.setTarget(new THREE.Vector3(half, 0, half));
     this.controls.setDistance(Math.max(planeSize * 0.9, 26));
-    if (this.water && this.water.enabled) this._rebuildWaterGeometry();
+
     this._recomputeCityStats();
   }
 
@@ -1705,13 +1198,6 @@ class City3DGame {
   this._lastTime = t;
   // Apply time scaling to simulation; visuals (shaders) continue real-time
   const sdt = dt * (this.timeScale || 0);
-  // Periodically refresh timezone label and auto day/night (every ~10s)
-  this._lastTZUpdate += dt;
-  if (this._lastTZUpdate >= 10) {
-    this._lastTZUpdate = 0;
-    this._updateTimezoneLabel();
-    this._autoSetTimeOfDay();
-  }
 
     // (River animation removed)
     if (this._waterShader) {
@@ -1749,14 +1235,6 @@ class City3DGame {
 
   // People wander in parks
   this._updatePeople(sdt);
-  // Passive income: accrues every second
-  this._incomeTimer += sdt;
-  if (this._incomeTimer >= 1.0) {
-    const perSecond = this._estimateIncomePerSecond();
-    if (perSecond > 0) this.coins += perSecond;
-    this._incomeTimer = 0;
-    this._updateUI();
-  }
 
   this.controls.update();
     // Drive world-space water shader
@@ -1844,6 +1322,66 @@ class City3DGame {
       const m = this.grid[it.r][it.c];
       if (m) this._applyWaterTexture(m, it.r, it.c);
     }
+  }
+
+  _placeWaterTile(row, col) {
+    if (row < 0 || col < 0 || row >= this.gridSize || col >= this.gridSize) return;
+    if (this.grid[row][col]) return; // don't overwrite
+    const m = this._createBuildingMesh('water');
+    const pos = this._gridToWorld(col, row);
+    m.position.set(pos.x, m.position.y, pos.z);
+    m.userData = { type: 'water', grid: { col, row } };
+    this.scene.add(m);
+    this.buildings.push(m);
+    this.grid[row][col] = m;
+  }
+
+  _refreshAllWater() {
+    for (let r = 0; r < this.gridSize; r++) {
+      for (let c = 0; c < this.gridSize; c++) {
+        if (this._isWaterCell(r, c)) {
+          this._refreshWaterAtAndNeighbors(r, c);
+        }
+      }
+    }
+  }
+
+  _generateDefaultPonds() {
+    const size = this.gridSize;
+    if (size < 3) return;
+
+    const pondCells = new Set();
+    const addCircle = (cr, cc, rad) => {
+      for (let r = 0; r < size; r++) {
+        for (let c = 0; c < size; c++) {
+          const distSq = (r - cr) * (r - cr) + (c - cc) * (c - cc);
+          if (distSq <= rad * rad) {
+            pondCells.add(`${r},${c}`);
+          }
+        }
+      }
+    };
+
+    // Corner Pond 1 (Mixed circular shape - 2 overlapping circles)
+    const r1 = size - 2;
+    const c1 = size - 2;
+    const r2 = size - 1;
+    const c2 = size - 1;
+    addCircle(r1, c1, 1.0);
+    addCircle(r2, c2, 1.0);
+
+    // Corner Pond 2 (Smaller pond - 1 circle)
+    const r3 = 0;
+    const c3 = 1;
+    const rad3 = size >= 6 ? 1.0 : 0.8; // only 1 tile if grid is small
+    addCircle(r3, c3, rad3);
+
+    for (const cellStr of pondCells) {
+      const [r, c] = cellStr.split(',').map(Number);
+      this._placeWaterTile(r, c);
+    }
+
+    this._refreshAllWater();
   }
 
   _countRoadTiles() {
@@ -2121,86 +1659,6 @@ class City3DGame {
     while (container.children.length > maxItems) container.removeChild(container.lastChild);
   }
 
-  // --- Time zone and day/night helpers ---
-  _updateTimezoneLabel() {
-    if (!this.tzTextEl) return;
-    try {
-      const now = new Date();
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local Time';
-      const hh = now.getHours().toString().padStart(2,'0');
-      const mm = now.getMinutes().toString().padStart(2,'0');
-      this.tzTextEl.textContent = `Time: ${hh}:${mm} (${tz})`;
-    } catch {
-      // no-op
-    }
-  }
-
-  _autoSetTimeOfDay() {
-    // Only change automatically if user hasn't forced a mode via toggle in past ~30s
-    if (this._userForcedTime && (performance.now() - this._userForcedTime) < 30000) return;
-    const h = new Date().getHours();
-    const mode = (h >= 19 || h < 6) ? 'night' : 'day';
-    if (mode !== this.timeOfDay) this._applyTimeOfDay(mode);
-  }
-
-  _applyTimeOfDay(mode, userTrigger = false) {
-    this.timeOfDay = mode;
-    if (userTrigger) this._userForcedTime = performance.now();
-    // Lights
-    const sun = this.scene.children.find(n=> n.isDirectionalLight) || null;
-    const hemi = this.scene.children.find(n=> n.isHemisphereLight) || null;
-    const amb = this.scene.children.find(n=> n.isAmbientLight) || null;
-    const sky = this.scene.children.find(n=> n.material && n.material.uniforms && n.geometry && n.geometry.type==='SphereGeometry') || null;
-    if (mode === 'night') {
-      if (sun) sun.intensity = 0.35;
-      if (hemi) hemi.intensity = 0.35;
-      if (amb) amb.intensity = 0.12;
-      this.renderer.toneMappingExposure = 0.95;
-      // Darker sky
-      if (sky && sky.material.uniforms) {
-        sky.material.uniforms.topColor.value.set(0x0b0d16);
-        sky.material.uniforms.bottomColor.value.set(0x07080c);
-        sky.material.uniforms.exponent.value = 0.8;
-      }
-    } else {
-      if (sun) sun.intensity = 1.8;
-      if (hemi) hemi.intensity = 0.6;
-      if (amb) amb.intensity = 0.22;
-      this.renderer.toneMappingExposure = 1.15;
-      // Brighter sky
-      if (sky && sky.material.uniforms) {
-        sky.material.uniforms.topColor.value.set(0x151826);
-        sky.material.uniforms.bottomColor.value.set(0x0e0f14);
-        sky.material.uniforms.exponent.value = 0.6;
-      }
-    }
-    // Building emissive pop at night
-    for (const b of this.buildings) {
-      if (!b.material) continue;
-      const mats = Array.isArray(b.material) ? b.material : [b.material];
-      for (const m of mats) {
-        if (!m.emissive) continue;
-        m.emissiveIntensity = mode === 'night' ? Math.max(m.emissiveIntensity || 0.3, 0.5) : Math.min(m.emissiveIntensity || 0.3, 0.35);
-      }
-    }
-    // Streetlights: brighten at night, dim in day
-    for (const pl of this.streetLightPoints) {
-      pl.intensity = mode==='night' ? this.streetLightNightIntensity : 0.15;
-    }
-    for (const h of this.streetLightHalos) {
-      if (h.material) h.material.opacity = mode==='night' ? 0.5 : 0.08;
-    }
-    for (const b of this.streetLightBeams) {
-      if (b.material) b.material.opacity = mode==='night' ? 0.18 : 0.0;
-    }
-    // Rebuild/refresh lamps on all road tiles
-    for (const m of this.buildings) {
-      if (!m.userData || m.userData.type !== 'road') continue;
-      const g = m.userData.grid; if (!g) continue;
-      this._rebuildStreetLightsForTile(g.row, g.col, m);
-    }
-    this._feed(mode === 'night' ? 'Night mode' : 'Day mode');
-  }
 
 }
 

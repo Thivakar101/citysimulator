@@ -119,6 +119,8 @@
             position: absolute;
             inset: 0;
             z-index: 1;
+            user-select: none;
+            -webkit-user-select: none;
         }
         #status {
             position: absolute;
@@ -190,11 +192,10 @@
             <div class="ghost"></div>
             <div class="entry-card">
                 <div class="brand">SimLife City</div>
-                <div class="tag">Build, grow and vibe — roads, people, water and life.</div>
+                <div class="tag">Build, grow and vibe — roads, people, and life.</div>
                 <div class="chips">
                     <div class="chip">Smart Roads</div>
                     <div class="chip">Population & Happiness</div>
-                    <div class="chip">Flowing Water</div>
                     <div class="chip">Parks & Factories</div>
                     <div class="chip">Expand the Map</div>
                 </div>
@@ -207,7 +208,6 @@
         <div id="ui">
                         <div id="hud">
                         <span id="coinText">Coins: 0</span>
-                        <span id="tzText" style="margin-left:12px; opacity:0.9">Time: --</span>
                         <span id="popText" style="margin-left:12px">Population: 0</span>
                         <span id="happyText" style="margin-left:12px">Happiness: 100%</span>
                         <span id="levelText" style="margin-left:12px">Level: 1</span>
@@ -219,7 +219,6 @@
                             <button id="btn2x" title="2x">2×</button>
                             <button id="btn3x" title="3x">3×</button>
                         </div>
-                        <button id="toggleDayNightBtn" title="Toggle Day/Night" style="background:#444c5e; box-shadow:none; margin-left:8px;">Day/Night</button>
                         <button id="buyBuildingBtn" title="Quick House">Quick House</button>
                         <button id="expandCityBtn" style="background:linear-gradient(135deg,#ff8a5b,#ffcd6a)">Expand City (-100)</button>
                         
@@ -231,7 +230,6 @@
                     <div class="store-item"><span>Tower</span><span class="store-pill">75</span><button id="buyTower">Select</button></div>
                     <div class="store-item"><span>Factory</span><span class="store-pill">100</span><button id="buyFactory">Select</button></div>
                     <div class="store-item"><span>Park</span><span class="store-pill">30</span><button id="buyPark">Select</button></div>
-                    <div class="store-item"><span>Water</span><span class="store-pill">0</span><button id="buyWater">Select</button></div>
                     <button id="cancelPlacement" style="margin-top:8px; background:#444c5e; box-shadow:none;">Cancel Placement</button>
                 </div>
                 <div id="rightPanel">
@@ -244,11 +242,9 @@
                         <div class="stat"><span>Population</span><span id="statPopulation">0</span></div>
                         <div class="stat"><span>Happiness</span><span id="statHappiness">100%</span></div>
                         <div class="stat"><span>Level</span><span id="statLevel">1</span></div>
-                        <div class="stat"><span>Income / s</span><span id="statIncome">0</span></div>
                     </div>
                     <div id="panelEconomy" class="panel" style="display:none">
                         <div class="stat"><span>Coins</span><span id="statCoins">0</span></div>
-                        <div class="stat"><span>Income / s</span><span id="statIncome2">0</span></div>
                     </div>
                     <div id="panelPolicies" class="panel" style="display:none">
                         <div class="stat"><span>Tax Rate</span><span>Coming soon</span></div>
