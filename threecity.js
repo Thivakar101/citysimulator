@@ -158,9 +158,6 @@ class City3DGame {
   this.population = 0;
   this.happiness = 1.0; // 0..1
   this.level = 1;
-  this._incomeTimer = 0;
-  this.timeOfDay = 'day';
-  this._lastTZUpdate = 0;
   this.buildings = []; // store meshes
   this.grid = Array.from({ length: gridSize }, () => Array(gridSize).fill(null));
   this.raycaster = new THREE.Raycaster();
@@ -169,7 +166,7 @@ class City3DGame {
   this.currentPlacement = null; // { type, cost }
   this.isRelocating = null; // building being moved
   this.textureCache = {};
-  this.placementRotation = 0; // radians; used during placement (roads orient with R key)
+  this.placementRotation = 0; // radians; used during placement
   this.smokePuffs = [];
   this._lastTime = performance.now() * 0.001;
   this.cars = [];
@@ -178,7 +175,6 @@ class City3DGame {
   this._maxCars = 6;
   // Street lights
   this.streetLightPoints = [];
-  this.streetLightNightIntensity = 1.35;
   // Simulation speed control (0 = paused, 1/2/3 = normal/2x/3x)
   this.timeScale = 1;
   this._lastLevel = 1;
@@ -306,23 +302,7 @@ class City3DGame {
   this.coinTextEl = document.getElementById('coinText') || null;
   this.popTextEl = document.getElementById('popText') || null;
   this.happyTextEl = document.getElementById('happyText') || null;
-  this.levelTextEl = document.getElementById('levelText') || null;
-  // Right panel stat refs (optional, if present)
-  this.stat = {
-    population: document.getElementById('statPopulation') || null,
-    happiness: document.getElementById('statHappiness') || null,
-    level: document.getElementById('statLevel') || null,
-    coins: document.getElementById('statCoins') || null,
-  };
-  // Speed buttons (optional)
-  this.speedBtns = {
-    pause: document.getElementById('btnPause') || null,
-    x1: document.getElementById('btnPlay') || null,
-    x2: document.getElementById('btn2x') || null,
-    x3: document.getElementById('btn3x') || null,
-  };
   this.getCoinsBtn = document.getElementById('getCoinsBtn') || null;
-  this.buyBuildingBtn = document.getElementById('buyBuildingBtn') || null;
   this.expandCityBtn = document.getElementById('expandCityBtn') || null;
     // Store buttons
     this.ui = {
@@ -343,15 +323,6 @@ class City3DGame {
     }
     if (this.expandCityBtn) {
       this.expandCityBtn.addEventListener('click', () => this._tryExpandCity());
-    }
-    if (this.buyBuildingBtn) {
-      this.buyBuildingBtn.addEventListener('click', () => {
-        // Enter placement mode for a House costing 50
-        this.currentPlacement = { type: 'house', cost: 50 };
-        this.isRelocating = null;
-        this._ensureGhost('house');
-        this._updateUI();
-      });
     }
 
   // Hook store selections
@@ -751,13 +722,12 @@ class City3DGame {
 
   _updateAttachedStreetLight(roadMesh) {
     if (!roadMesh) return;
-    // Find point lights under this road and set intensity
     roadMesh.traverse(n => {
       if (n.isPointLight) {
-        n.intensity = this.timeOfDay==='night' ? this.streetLightNightIntensity : 0.15;
+        n.intensity = 0.15;
       }
       if (n.material && n.material.emissive) {
-        n.material.emissiveIntensity = this.timeOfDay==='night' ? 1.2 : 0.05;
+        n.material.emissiveIntensity = 0.05;
       }
     });
   }
@@ -800,7 +770,7 @@ class City3DGame {
       lamp.userData.kind = 'streetlight';
       roadMesh.add(lamp);
       // Spot-like light: use PointLight for perf
-      const intensity = this.timeOfDay==='night'? this.streetLightNightIntensity : 0.1;
+      const intensity = 0.1;
       const p = new THREE.PointLight(0xfff2b6, intensity, this.cellSize * 2.6, 1.6);
       p.position.set(lx, yBase + this.cellSize*0.9, lz);
       p.castShadow = false;
@@ -979,25 +949,12 @@ class City3DGame {
   }
 
   _updateUI() {
-    if (this.coinTextEl) this.coinTextEl.textContent = `Coins: ${this.coins}`;
-    if (this.popTextEl) this.popTextEl.textContent = `Population: ${this.population}`;
-    if (this.happyTextEl) this.happyTextEl.textContent = `Happiness: ${Math.round(this.happiness*100)}%`;
-    if (this.levelTextEl) this.levelTextEl.textContent = `Level: ${this.level}`;
-    // Right-panel stats, if present
-    if (this.stat.population) this.stat.population.textContent = `${this.population}`;
-    if (this.stat.happiness) this.stat.happiness.textContent = `${Math.round(this.happiness*100)}%`;
-    if (this.stat.level) this.stat.level.textContent = `${this.level}`;
-    if (this.stat.coins) this.stat.coins.textContent = `${this.coins}`;
-    if (this.buyBuildingBtn) {
-      const cityFull = this.buildings.length >= this.gridSize * this.gridSize;
-      const canBuyHouse = this.coins >= 50 && !cityFull;
-      this.buyBuildingBtn.disabled = !canBuyHouse;
-      this.buyBuildingBtn.textContent = canBuyHouse ? 'Quick House' : (cityFull ? 'City Full' : 'Need 50 Coins');
-    }
+    if (this.coinTextEl) this.coinTextEl.textContent = `${this.coins}`;
+    if (this.popTextEl) this.popTextEl.textContent = `${this.population}`;
+    if (this.happyTextEl) this.happyTextEl.textContent = `${Math.round(this.happiness*100)}%`;
     if (this.expandCityBtn) {
       const canExpand = this.coins >= this.expandCost;
       this.expandCityBtn.disabled = !canExpand;
-      this.expandCityBtn.textContent = canExpand ? `Expand City (-${this.expandCost})` : `Need ${this.expandCost} Coins`;
     }
   }
 

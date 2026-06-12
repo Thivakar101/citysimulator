@@ -2,119 +2,29 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>City Builder Mini-Game</title>
+    <title>My City</title>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;900&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --bg: #0f1116;
-            --panel: #1a1d26;
-            --accent: #6aa9ff;
-            --accent2: #8ee0d6;
-            --text: #e7ecf3;
-        }
-        * { box-sizing: border-box; }
-        html, body { height: 100%; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; overflow: hidden; }
+
         body {
-            background: radial-gradient(1000px 600px at 50% -200px, #1c2030, var(--bg));
-            color: var(--text);
-            font-family: ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-            margin: 0;
-            padding: 0;
+            background: #eaf7ff;
+            font-family: 'Nunito', 'Arial Rounded MT Bold', Arial, sans-serif;
             display: grid;
             place-items: center;
+            color: #213547;
         }
+
+        /* ── Main wrapper ── */
         #ui {
-            width: min(96vw, 1100px);
-            height: min(88vh, 680px);
+            width: 100vw;
+            height: 100vh;
             position: relative;
-            border-radius: 16px;
-            background: linear-gradient(180deg, #1b1e2a 0%, #12141b 100%);
-            box-shadow: 0 20px 50px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
             overflow: hidden;
         }
-    #hud {
-            position: absolute;
-            top: 12px;
-            left: 12px;
-            right: 12px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 12px;
-            border-radius: 12px;
-            background: rgba(20,22,30,0.6);
-            backdrop-filter: blur(6px);
-            border: 1px solid rgba(255,255,255,0.06);
-            z-index: 2;
-        }
-        #coinText { font-weight: 600; letter-spacing: 0.3px; }
-        .spacer { flex: 1; }
-        button {
-            appearance: none;
-            border: 0;
-            padding: 10px 14px;
-            border-radius: 10px;
-            color: var(--text);
-            background: linear-gradient(135deg, var(--accent), var(--accent2));
-            font-weight: 600;
-            cursor: pointer;
-            box-shadow: 0 6px 18px rgba(80,140,255,0.35);
-            transition: transform 0.1s ease, filter 0.2s ease, opacity 0.2s ease;
-        }
-        button:hover { filter: brightness(1.06); transform: translateY(-1px); }
-        button:active { transform: translateY(0); }
-        button[disabled] {
-            background: #2a2f3d; color: #9aa4b2; cursor: not-allowed; box-shadow: none;
-        }
-        /* Store panel */
-        #store {
-            position: absolute;
-            left: 12px;
-            top: 66px;
-            bottom: 12px;
-            width: 220px;
-            padding: 12px;
-            border-radius: 12px;
-            background: rgba(20,22,30,0.6);
-            border: 1px solid rgba(255,255,255,0.06);
-            backdrop-filter: blur(6px);
-            z-index: 2;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        /* Right dashboard */
-        #rightPanel {
-            position: absolute;
-            right: 12px;
-            top: 66px;
-            bottom: 12px;
-            width: 260px;
-            padding: 12px;
-            border-radius: 12px;
-            background: rgba(20,22,30,0.6);
-            border: 1px solid rgba(255,255,255,0.06);
-            backdrop-filter: blur(6px);
-            z-index: 2;
-            display: flex; flex-direction: column;
-        }
-        .tabs { display:flex; gap:6px; margin-bottom:8px; }
-        .tabs button { flex:1; padding:8px 10px; border-radius: 8px; background:#2a2f3d; box-shadow:none; }
-        .tabs button.active { background:linear-gradient(135deg,#6aa9ff,#8ee0d6); }
-        .panel { flex:1; overflow:auto; padding:6px; border-radius:8px; border:1px solid rgba(255,255,255,0.05); }
-        .stat { display:flex; justify-content:space-between; padding:8px 6px; border-bottom:1px dashed rgba(255,255,255,0.06); font-size:14px; }
-        .stat:last-child { border-bottom:0; }
-        /* Speed controls in HUD */
-        .speed { display:flex; gap:6px; margin-left:8px; }
-        .speed button { background:#2a2f3d; box-shadow:none; padding:8px 10px; }
-        .speed button.active { background:linear-gradient(135deg,#8ee0d6,#6aa9ff); }
-        /* Notifications feed */
-        #feed { position:absolute; left:12px; bottom:12px; z-index:3; display:flex; flex-direction:column; gap:6px; }
-        .toast { background: rgba(30,34,45,0.85); border:1px solid rgba(255,255,255,0.08); color:#e7ecf3; padding:8px 10px; border-radius:8px; font-size:12px; box-shadow:0 6px 14px rgba(0,0,0,0.35); }
-        #store h3 { margin: 0 0 6px 0; font-size: 14px; opacity: 0.9; }
-        .store-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-        .store-item button { width: 110px; }
-        .store-pill { font-size: 12px; opacity: 0.85; padding: 4px 8px; border-radius: 999px; background: #2a2f3d; }
 
+        /* ── 3D canvas fills everything ── */
         #game-container {
             position: absolute;
             inset: 0;
@@ -122,183 +32,421 @@
             user-select: none;
             -webkit-user-select: none;
         }
+
+        /* ── Top bar ── */
+        #hud {
+            position: absolute;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.95);
+            border: 2px solid #b9e4ff;
+            border-radius: 18px;
+            padding: 8px 12px;
+            box-shadow: 0 8px 20px rgba(61, 128, 169, 0.14);
+        }
+
+        .hud-stat {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 18px;
+            font-weight: 900;
+            color: #213547;
+            white-space: nowrap;
+        }
+        .hud-stat .emoji { font-size: 20px; }
+        .hud-sep { width: 1px; height: 24px; background: #d8eefc; }
+
+        /* ── Left store panel ── */
+        #store {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+                gap: 8px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 2px solid #b9e4ff;
+            border-radius: 18px;
+            padding: 12px;
+            box-shadow: 0 8px 20px rgba(61, 128, 169, 0.14);
+        }
+
+        .store-title {
+            text-align: center;
+            font-size: 18px;
+            font-weight: 900;
+            color: #213547;
+            margin-bottom: 0;
+        }
+
+        .build-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            border: none;
+            border-radius: 14px;
+            padding: 10px 12px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 900;
+            font-size: 13px;
+            color: #213547;
+            background: #f8fdff;
+            border: 2px solid #d4edf9;
+            transition: transform 0.12s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+            min-width: 86px;
+        }
+        .build-btn .btn-emoji { font-size: 30px; line-height: 1; }
+        .build-btn .btn-label { font-size: 14px; margin-top: 2px; }
+        .build-btn .btn-cost {
+            font-size: 12px;
+            background: #fff3bf;
+            border-radius: 10px;
+            padding: 2px 8px;
+            margin-top: 2px;
+            color: #6b4e00;
+        }
+        .build-btn:hover { transform: translateY(-1px); border-color: #81ccec; box-shadow: 0 6px 14px rgba(61, 128, 169, 0.16); }
+        .build-btn:active { transform: scale(0.96); }
+
+        .build-btn.road   { background: #eef2f7; border-color: #cbd5e1; }
+        .build-btn.house  { background: #e7f8ed; border-color: #a7e8bd; }
+        .build-btn.tower  { background: #e8f1ff; border-color: #aecbff; }
+        .build-btn.factory{ background: #fff0dc; border-color: #ffd19a; }
+        .build-btn.park   { background: #edfbdf; border-color: #b7e986; }
+
+        #cancelPlacement {
+            background: #fff1f2;
+            border: 2px solid #fecdd3;
+            border-radius: 12px;
+            color: #9f1239;
+            font-family: inherit;
+            font-weight: 900;
+            font-size: 14px;
+            padding: 9px 8px;
+            cursor: pointer;
+            transition: transform 0.1s ease;
+            display: none; /* hidden until placement starts */
+        }
+        #cancelPlacement:hover { transform: scale(1.05); }
+        #cancelPlacement.visible { display: block; }
+
+        /* ── Bottom action buttons ── */
+        #actions {
+            position: absolute;
+            bottom: 18px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 12px;
+        }
+
+        .action-btn {
+            border: none;
+            border-radius: 14px;
+            padding: 13px 18px;
+            font-family: inherit;
+            font-weight: 900;
+            font-size: 16px;
+            color: #213547;
+            cursor: pointer;
+            transition: transform 0.12s ease, filter 0.15s ease, opacity 0.15s ease;
+            box-shadow: 0 8px 18px rgba(61, 128, 169, 0.14);
+            white-space: nowrap;
+        }
+        .action-btn:hover { transform: translateY(-1px); filter: brightness(1.03); }
+        .action-btn:active { transform: scale(0.97); }
+        .action-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+        #getCoinsBtn  { background: #ffe082; border: 2px solid #f6c453; }
+        #expandCityBtn{ background: #b8f3d4; border: 2px solid #7ddfb0; }
+
+        /* ── Status toast ── */
         #status {
             position: absolute;
-            bottom: 12px;
-            right: 12px;
-            padding: 8px 10px;
-            border-radius: 8px;
-            background: rgba(200,60,60,0.15);
-            color: #ffdddd;
-            border: 1px solid rgba(255,100,100,0.3);
-            font-size: 12px;
-            max-width: 60ch;
-            line-height: 1.3;
-            z-index: 3;
+            bottom: 76px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            padding: 10px 16px;
+            border-radius: 14px;
+            background: #fff7ed;
+            border: 2px solid #fed7aa;
+            color: #9a3412;
+            font-size: 15px;
+            font-weight: 900;
+            font-family: inherit;
             display: none;
+            white-space: nowrap;
         }
-        /* Entry overlay */
+
+        /* ── Entry / splash screen ── */
         #entry {
             position: fixed;
             inset: 0;
             display: grid;
             place-items: center;
-            background: radial-gradient(1200px 700px at 50% -200px, #212435, #0c0e13);
-            z-index: 5;
-            color: var(--text);
-            overflow: hidden;
+            background: #eaf7ff;
+            z-index: 50;
         }
+
         .entry-card {
-            width: min(92vw, 880px);
-            padding: 32px 28px;
-            border-radius: 18px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
-            border: 1px solid rgba(255,255,255,0.08);
-            box-shadow: 0 20px 60px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06);
-            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0;
             text-align: center;
-            transform: translateY(16px);
+            background: #ffffff;
+            border: 2px solid #b9e4ff;
+            border-radius: 18px;
+            padding: 30px;
+            box-shadow: 0 10px 26px rgba(61, 128, 169, 0.16);
+            animation: popIn 360ms ease forwards;
             opacity: 0;
-            animation: cardIn 700ms ease forwards 120ms;
         }
-        @keyframes cardIn { to { transform: translateY(0); opacity: 1; } }
-        .brand {
-            font-size: clamp(28px, 7vw, 56px);
-            font-weight: 800;
-            letter-spacing: 0.6px;
-            background: linear-gradient(135deg, #8fdcff, #a7ffcf);
-            -webkit-background-clip: text; background-clip: text; color: transparent;
-            margin: 4px 0 6px 0;
+        @keyframes popIn { to { opacity:1; transform: scale(1); } from { opacity:0; transform: scale(0.96); } }
+
+        .entry-emoji { font-size: clamp(60px, 12vw, 100px); margin-bottom: 8px; }
+
+        .entry-title {
+            font-size: clamp(34px, 7vw, 60px);
+            font-weight: 900;
+            color: #213547;
+            line-height: 1.1;
+            margin-bottom: 10px;
         }
-        .tag {
-            font-size: clamp(12px, 2.4vw, 16px);
-            opacity: 0.85;
-            margin-bottom: 18px;
+
+        .entry-subtitle {
+            font-size: clamp(16px, 2.5vw, 21px);
+            color: #4b6475;
+            font-weight: 700;
+            margin-bottom: 24px;
         }
-        .chips { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin: 8px 0 18px; }
-        .chip { padding: 6px 10px; border-radius: 999px; background:#171a23; border:1px solid rgba(255,255,255,0.08); font-size:12px; opacity:0.9 }
-        .cta-row { display:flex; gap:10px; justify-content:center; }
-        .cta-row button { font-size:16px; padding:12px 16px; border-radius:12px; }
-        .ghost {
-            position:absolute; inset: -10% -10% auto auto; height: 240px; width: 240px; border-radius: 50%;
-            background: radial-gradient(closest-side, rgba(120,180,255,0.25), rgba(120,180,255,0)); filter: blur(20px);
-            animation: glow 5s ease-in-out infinite alternate;
+
+        .entry-btns {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
         }
-        @keyframes glow { from { transform: translate(0,0);} to { transform: translate(-10px,8px);} }
+
+        .entry-btn {
+            border: none;
+            border-radius: 14px;
+            padding: 15px 26px;
+            font-family: inherit;
+            font-weight: 900;
+            font-size: clamp(16px, 2.5vw, 20px);
+            color: #213547;
+            cursor: pointer;
+            transition: transform 0.12s ease, filter 0.15s ease;
+            box-shadow: 0 8px 18px rgba(61, 128, 169, 0.14);
+        }
+        .entry-btn:hover { transform: translateY(-1px); filter: brightness(1.03); }
+        .entry-btn:active { transform: scale(0.95); }
+        #startBtn   { background: #b8f3d4; border: 2px solid #7ddfb0; }
+        #sandboxBtn { background: #ffe082; border: 2px solid #f6c453; }
+
+        @media (max-width: 700px) {
+            #hud {
+                top: 10px;
+                padding: 7px 10px;
+            }
+
+            .hud-stat { font-size: 15px; }
+
+            #store {
+                left: 50%;
+                right: auto;
+                top: auto;
+                bottom: 82px;
+                transform: translateX(-50%);
+                flex-direction: row;
+                align-items: center;
+                max-width: calc(100vw - 20px);
+                overflow-x: auto;
+                padding: 9px;
+            }
+
+            .store-title { display: none; }
+            .build-btn {
+                flex: 0 0 58px;
+                min-width: 58px;
+                padding: 8px 6px;
+            }
+            .build-btn .btn-emoji { font-size: 25px; }
+            .build-btn .btn-label { font-size: 12px; }
+            .build-btn .btn-cost { font-size: 11px; }
+
+            #actions {
+                width: calc(100vw - 20px);
+                bottom: 10px;
+                justify-content: center;
+            }
+
+            .action-btn {
+                flex: 1;
+                max-width: 170px;
+                padding: 11px 10px;
+                font-size: 14px;
+            }
+
+            #status {
+                bottom: 148px;
+                max-width: calc(100vw - 24px);
+                white-space: normal;
+                text-align: center;
+            }
+        }
     </style>
 </head>
 <body>
-        <div id="entry">
-            <div class="ghost"></div>
-            <div class="entry-card">
-                <div class="brand">SimLife City</div>
-                <div class="tag">Build, grow and vibe — roads, people, and life.</div>
-                <div class="chips">
-                    <div class="chip">Smart Roads</div>
-                    <div class="chip">Population & Happiness</div>
-                    <div class="chip">Parks & Factories</div>
-                    <div class="chip">Expand the Map</div>
-                </div>
-                <div class="cta-row">
-                    <button id="startBtn">Start</button>
-                    <button id="sandboxBtn" style="background:linear-gradient(135deg,#8ee0d6,#6aa9ff)">Sandbox</button>
-                </div>
+
+    <!-- Splash screen -->
+    <div id="entry">
+        <div class="entry-card">
+            <div class="entry-emoji">🏙️</div>
+            <div class="entry-title">My City!</div>
+            <div class="entry-subtitle">Make a small happy town.</div>
+            <div class="entry-btns">
+                <button class="entry-btn" id="startBtn">▶ Play</button>
+                <button class="entry-btn" id="sandboxBtn">✨ Free Play</button>
             </div>
         </div>
-        <div id="ui">
-                        <div id="hud">
-                        <span id="coinText">Coins: 0</span>
-                        <span id="popText" style="margin-left:12px">Population: 0</span>
-                        <span id="happyText" style="margin-left:12px">Happiness: 100%</span>
-                        <span id="levelText" style="margin-left:12px">Level: 1</span>
-                        <div class="spacer"></div>
-                        <button id="getCoinsBtn">Get Coins (+10T)</button>
-                        <div class="speed">
-                            <button id="btnPause" title="Pause">II</button>
-                            <button id="btnPlay" class="active" title="Play">▶</button>
-                            <button id="btn2x" title="2x">2×</button>
-                            <button id="btn3x" title="3x">3×</button>
-                        </div>
-                        <button id="buyBuildingBtn" title="Quick House">Quick House</button>
-                        <button id="expandCityBtn" style="background:linear-gradient(135deg,#ff8a5b,#ffcd6a)">Expand City (-100)</button>
-                        
-                </div>
-                <div id="store">
-                    <h3>Store</h3>
-                    <div class="store-item"><span>Road</span><span class="store-pill">5</span><button id="buyRoad">Select</button></div>
-                    <div class="store-item"><span>House</span><span class="store-pill">50</span><button id="buyHouse">Select</button></div>
-                    <div class="store-item"><span>Tower</span><span class="store-pill">75</span><button id="buyTower">Select</button></div>
-                    <div class="store-item"><span>Factory</span><span class="store-pill">100</span><button id="buyFactory">Select</button></div>
-                    <div class="store-item"><span>Park</span><span class="store-pill">30</span><button id="buyPark">Select</button></div>
-                    <button id="cancelPlacement" style="margin-top:8px; background:#444c5e; box-shadow:none;">Cancel Placement</button>
-                </div>
-                <div id="rightPanel">
-                    <div class="tabs">
-                        <button id="tabCity" class="active">City</button>
-                        <button id="tabEconomy">Economy</button>
-                        <button id="tabPolicies">Policies</button>
-                    </div>
-                    <div id="panelCity" class="panel">
-                        <div class="stat"><span>Population</span><span id="statPopulation">0</span></div>
-                        <div class="stat"><span>Happiness</span><span id="statHappiness">100%</span></div>
-                        <div class="stat"><span>Level</span><span id="statLevel">1</span></div>
-                    </div>
-                    <div id="panelEconomy" class="panel" style="display:none">
-                        <div class="stat"><span>Coins</span><span id="statCoins">0</span></div>
-                    </div>
-                    <div id="panelPolicies" class="panel" style="display:none">
-                        <div class="stat"><span>Tax Rate</span><span>Coming soon</span></div>
-                        <div class="stat"><span>Environment</span><span>Coming soon</span></div>
-                    </div>
-                </div>
-                <div id="game-container"></div>
-                        <div id="status"></div>
-                        <div id="feed"></div>
+    </div>
+
+    <!-- Main game UI -->
+    <div id="ui">
+
+        <!-- 3D canvas -->
+        <div id="game-container"></div>
+
+        <!-- Top HUD bar -->
+        <div id="hud">
+            <div class="hud-stat"><span class="emoji">🪙</span> <span id="coinText">0</span></div>
+            <div class="hud-sep"></div>
+            <div class="hud-stat"><span class="emoji">👥</span> <span id="popText">0</span></div>
+            <div class="hud-sep"></div>
+            <div class="hud-stat"><span class="emoji">😊</span> <span id="happyText">100%</span></div>
         </div>
 
-                    <!-- Three.js from CDN -->
-                    <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
-            <script src="./threecity.js"></script>
-            <script>
-                window.addEventListener('DOMContentLoaded', async () => {
-                    const statusEl = document.getElementById('status');
-                    const showError = (msg) => { statusEl.textContent = msg; statusEl.style.display = 'block'; };
+        <!-- Left store -->
+        <div id="store">
+            <div class="store-title">Build</div>
+            <button class="build-btn road"    id="buyRoad">
+                <span class="btn-emoji">🛣️</span>
+                <span class="btn-label">Road</span>
+                <span class="btn-cost">🪙 5</span>
+            </button>
+            <button class="build-btn house"   id="buyHouse">
+                <span class="btn-emoji">🏠</span>
+                <span class="btn-label">House</span>
+                <span class="btn-cost">🪙 50</span>
+            </button>
+            <button class="build-btn tower"   id="buyTower">
+                <span class="btn-emoji">🏢</span>
+                <span class="btn-label">Tower</span>
+                <span class="btn-cost">🪙 75</span>
+            </button>
+            <button class="build-btn factory" id="buyFactory">
+                <span class="btn-emoji">🏭</span>
+                <span class="btn-label">Factory</span>
+                <span class="btn-cost">🪙 100</span>
+            </button>
+            <button class="build-btn park"    id="buyPark">
+                <span class="btn-emoji">🌳</span>
+                <span class="btn-label">Park</span>
+                <span class="btn-cost">🪙 30</span>
+            </button>
+            <button id="cancelPlacement">❌ Stop</button>
+        </div>
 
-                    try {
-                        if (!window.THREE) throw new Error('Three.js failed to load. Check network or CDN.');
-                                                const game = new City3DGame({ containerId: 'game-container', gridSize: 5, cellSize: 6, buildingCost: 50, coinIncrement: 10000000000000 });
-                                                // Tabs
-                                                const tabs = [
-                                                    { btn: document.getElementById('tabCity'), panel: document.getElementById('panelCity') },
-                                                    { btn: document.getElementById('tabEconomy'), panel: document.getElementById('panelEconomy') },
-                                                    { btn: document.getElementById('tabPolicies'), panel: document.getElementById('panelPolicies') },
-                                                ];
-                                                const setTab = (idx)=>{
-                                                    tabs.forEach((t,i)=>{ t.btn.classList.toggle('active', i===idx); t.panel.style.display = i===idx ? 'block':'none'; });
-                                                };
-                                                tabs.forEach((t,i)=> t.btn.addEventListener('click', ()=> setTab(i)) );
-                                                // Speed controls
-                                                const sp = { pause: document.getElementById('btnPause'), play: document.getElementById('btnPlay'), x2: document.getElementById('btn2x'), x3: document.getElementById('btn3x') };
-                                                const setSpeed = (k)=>{
-                                                    game.setTimeScale(k);
-                                                    [sp.pause, sp.play, sp.x2, sp.x3].forEach(b=> b.classList.remove('active'));
-                                                    if (k===0) sp.pause.classList.add('active'); else if (k===1) sp.play.classList.add('active'); else if (k===2) sp.x2.classList.add('active'); else sp.x3.classList.add('active');
-                                                };
-                                                sp.pause.addEventListener('click', ()=> setSpeed(0));
-                                                sp.play.addEventListener('click', ()=> setSpeed(1));
-                                                sp.x2.addEventListener('click', ()=> setSpeed(2));
-                                                sp.x3.addEventListener('click', ()=> setSpeed(3));
-                        const entry = document.getElementById('entry');
-                        const startBtn = document.getElementById('startBtn');
-                        const sandboxBtn = document.getElementById('sandboxBtn');
-                        const hideEntry = () => { entry.style.transition='opacity 300ms ease'; entry.style.opacity='0'; setTimeout(()=> entry.style.display='none', 320); };
-                        startBtn.addEventListener('click', () => { hideEntry(); game.introCinematic?.(); });
-                        sandboxBtn.addEventListener('click', () => { game.coins = 999999; game._updateUI(); hideEntry(); game.introCinematic?.(); });
-                    } catch (e) {
-                        console.error(e);
-                        showError(e.message);
-                    }
+        <!-- Bottom action buttons -->
+        <div id="actions">
+            <button class="action-btn" id="getCoinsBtn">🪙 Get Coins</button>
+            <button class="action-btn" id="expandCityBtn">🗺️ More Land</button>
+        </div>
+
+        <!-- Status / error toast -->
+        <div id="status"></div>
+
+        <!-- Notification feed (hidden, used by JS) -->
+        <div id="feed" style="display:none;"></div>
+
+    </div>
+
+    <!-- Three.js -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+    <script src="./threecity.js"></script>
+    <script>
+        window.addEventListener('DOMContentLoaded', () => {
+            const statusEl = document.getElementById('status');
+            const showError = (msg) => { statusEl.textContent = msg; statusEl.style.display = 'block'; };
+
+            try {
+                if (!window.THREE) throw new Error('3D engine failed to load. Check your internet.');
+
+                const game = new City3DGame({
+                    containerId: 'game-container',
+                    gridSize: 5,
+                    cellSize: 6,
+                    buildingCost: 50,
+                    coinIncrement: 50
                 });
-            </script>
+
+                // Entry buttons
+                const entry = document.getElementById('entry');
+                const hideEntry = () => {
+                    entry.style.transition = 'opacity 350ms ease';
+                    entry.style.opacity = '0';
+                    setTimeout(() => entry.style.display = 'none', 370);
+                };
+                document.getElementById('startBtn').addEventListener('click', () => {
+                    game.coins = 200;
+                    game._updateUI();
+                    hideEntry();
+                    game.introCinematic?.();
+                });
+                document.getElementById('sandboxBtn').addEventListener('click', () => {
+                    game.coins = 9999;
+                    game._updateUI();
+                    hideEntry();
+                    game.introCinematic?.();
+                });
+
+                // Show/hide cancel button when placement active
+                const cancelBtn = document.getElementById('cancelPlacement');
+                const origCancelPlacement = game._cancelPlacement.bind(game);
+                game._cancelPlacement = () => {
+                    origCancelPlacement();
+                    cancelBtn.classList.remove('visible');
+                };
+                const origHookStore = game._hookStore.bind(game);
+                // Monkey-patch to show cancel on selection
+                ['buyRoad','buyHouse','buyTower','buyFactory','buyPark'].forEach(id => {
+                    const btn = document.getElementById(id);
+                    if (btn) btn.addEventListener('click', () => cancelBtn.classList.add('visible'));
+                });
+                cancelBtn.addEventListener('click', () => {
+                    game._cancelPlacement();
+                    cancelBtn.classList.remove('visible');
+                });
+
+            } catch (e) {
+                console.error(e);
+                showError('Oops! Something went wrong: ' + e.message);
+            }
+        });
+    </script>
 </body>
 </html>
