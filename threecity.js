@@ -166,6 +166,10 @@ class City3DGame {
   this.currentPlacement = null; // { type, cost }
   this.isRelocating = null; // building being moved
   this.textureCache = {};
+  this.houseAssetUrl = './building.glb';
+  this.houseAssetPromise = null;
+  this.houseAssetScene = null;
+  this.houseAssetBaseRotation = Math.PI / 2; // turn the custom house asset left
   this.placementRotation = 0; // radians; used during placement
   this.smokePuffs = [];
   this._lastTime = performance.now() * 0.001;
@@ -378,6 +382,11 @@ class City3DGame {
     const apply = (mat) => { if (mat && mat.color) mat.color.setHex(hex); };
     if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
     else apply(mesh.material);
+    mesh.traverse?.((child) => {
+      if (child === mesh || !child.material) return;
+      if (Array.isArray(child.material)) child.material.forEach(apply);
+      else apply(child.material);
+    });
   }
 
   _onPointerMove(event) {
@@ -454,6 +463,7 @@ class City3DGame {
     const mesh = this._createBuildingMesh(this.currentPlacement.type);
     const pos = this._gridToWorld(col, row);
     mesh.position.set(pos.x, mesh.position.y, pos.z);
+    mesh.rotation.y = this.currentPlacement.type === 'road' ? 0 : this.placementRotation;
     mesh.userData = { type: this.currentPlacement.type, grid: { col, row } };
     this.scene.add(mesh);
     this.buildings.push(mesh);
@@ -539,7 +549,9 @@ class City3DGame {
     };
     const h = (this.cellSize) * (heightBy[type] || 1.0);
     let geo, mat, mesh;
-  if (type === 'road') {
+  if (type === 'house') {
+      mesh = this._createHouseAssetMesh(ghost, h);
+  } else if (type === 'road') {
   // Road tile; keep visuals aligned with two-lane movement
   geo = new THREE.BoxGeometry(this.cellSize * 0.98, h, this.cellSize * 0.98);
   const roadTopTex = this._getRoadTexture();
@@ -582,14 +594,7 @@ class City3DGame {
       mesh.position.y = h / 2;
       mesh.castShadow = true; mesh.receiveShadow = true;
       if (!ghost) {
-        if (type === 'house') {
-          // gable roof for house
-          const roof = new THREE.Mesh(new THREE.ConeGeometry(this.cellSize * 0.42, this.cellSize * 0.28, 4), new THREE.MeshStandardMaterial({ color: 0xb35c4b, roughness: 0.8 }));
-          roof.position.y = h / 2 + this.cellSize * 0.18;
-          roof.rotation.y = Math.PI / 4;
-          roof.castShadow = true; roof.receiveShadow = true;
-          mesh.add(roof);
-        } else if (type === 'factory') {
+        if (type === 'factory') {
           // Factory hall extension
           const hall = new THREE.Mesh(new THREE.BoxGeometry(this.cellSize*0.9, h*0.55, this.cellSize*0.5), new THREE.MeshStandardMaterial({ color: 0xbfb7ab, roughness: 0.8 }));
           hall.position.set(0, -h*0.2, -this.cellSize*0.15);
@@ -622,6 +627,116 @@ class City3DGame {
       requestAnimationFrame(animateIn);
     }
     return mesh;
+  }
+
+  _createHouseAssetMesh(ghost, fallbackHeight) {
+    const pickHeight = Math.max(fallbackHeight, this.cellSize * 1.1);
+    const pickGeo = new THREE.BoxGeometry(this.cellSize * 0.88, pickHeight, this.cellSize * 0.88);
+    pickGeo.translate(0, pickHeight / 2, 0);
+    const pickMat = new THREE.MeshStandardMaterial({
+      color: ghost ? 0xcfd8e3 : 0xffffff,
+      roughness: 0.7,
+      metalness: 0.0,
+      opacity: ghost ? 0.35 : 0.001,
+      transparent: true,
+      depthWrite: !!ghost,
+    });
+    const mesh = new THREE.Mesh(pickGeo, pickMat);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.userData.assetType = 'house-glb';
+
+    this._loadHouseAsset()
+      .then((assetScene) => {
+        if (!assetScene) return;
+        const model = assetScene.clone(true);
+        model.name = 'building.glb house asset';
+        this._prepareHouseAssetModel(model, ghost);
+        mesh.add(model);
+      })
+      .catch((err) => {
+        console.warn('Could not load building.glb for house asset:', err);
+        this._addFallbackHouse(mesh, fallbackHeight, ghost);
+      });
+
+    return mesh;
+  }
+
+  async _loadHouseAsset() {
+    if (this.houseAssetScene) return Promise.resolve(this.houseAssetScene);
+    if (this.houseAssetPromise) return this.houseAssetPromise;
+    this.houseAssetPromise = import('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/loaders/GLTFLoader.js')
+      .then(({ GLTFLoader }) => new Promise((resolve, reject) => {
+        const loader = new GLTFLoader();
+      loader.load(
+        this.houseAssetUrl,
+        (gltf) => {
+          this.houseAssetScene = gltf.scene;
+          resolve(this.houseAssetScene);
+        },
+        undefined,
+        reject
+      );
+      }));
+    return this.houseAssetPromise;
+  }
+
+  _prepareHouseAssetModel(model, ghost) {
+    model.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+      if (ghost && child.material) {
+        const cloneMaterial = (mat) => {
+          const cloned = mat.clone();
+          cloned.transparent = true;
+          cloned.opacity = 0.55;
+          return cloned;
+        };
+        child.material = Array.isArray(child.material)
+          ? child.material.map(cloneMaterial)
+          : cloneMaterial(child.material);
+      }
+    });
+
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const footprint = this.cellSize * 0.86;
+    const maxHeight = this.cellSize * 1.45;
+    const scale = Math.min(
+      size.x ? footprint / size.x : 1,
+      size.z ? footprint / size.z : 1,
+      size.y ? maxHeight / size.y : 1
+    );
+
+    model.scale.setScalar(scale);
+    model.updateMatrixWorld(true);
+    const scaledBox = new THREE.Box3().setFromObject(model);
+    const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+    model.position.x -= scaledCenter.x;
+    model.position.z -= scaledCenter.z;
+    model.position.y -= scaledBox.min.y;
+    model.rotation.y = this.houseAssetBaseRotation;
+  }
+
+  _addFallbackHouse(mesh, h, ghost) {
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(this.cellSize * 0.9, h, this.cellSize * 0.9),
+      new THREE.MeshStandardMaterial({ color: 0xcfd8e3, roughness: 0.55, metalness: 0.2, opacity: ghost ? 0.6 : 1, transparent: ghost })
+    );
+    body.position.y = h / 2;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    const roof = new THREE.Mesh(
+      new THREE.ConeGeometry(this.cellSize * 0.42, this.cellSize * 0.28, 4),
+      new THREE.MeshStandardMaterial({ color: 0xb35c4b, roughness: 0.8, opacity: ghost ? 0.6 : 1, transparent: ghost })
+    );
+    roof.position.y = h + this.cellSize * 0.18;
+    roof.rotation.y = Math.PI / 4;
+    roof.castShadow = true;
+    roof.receiveShadow = true;
+    mesh.add(body);
+    mesh.add(roof);
   }
 
   _emitSmoke(originMesh) {
@@ -833,6 +948,7 @@ class City3DGame {
 
   _onKeyDown(e) {
     if (!this.ghost) return;
+    if (this.currentPlacement && this.currentPlacement.type === 'road') return; // auto-connect; ignore rotation for roads
     if (e.key === 'r' || e.key === 'R') {
       // Rotate placement by 90 degrees
       this.placementRotation = (this.placementRotation + Math.PI/2) % (Math.PI*2);
@@ -1165,9 +1281,13 @@ class City3DGame {
 
     // Subtle emissive pulsing for life
     for (const b of this.buildings) {
-      const mat = b.material;
       const pulse = 0.25 + 0.15 * Math.sin(t * 1.2 + b.position.x * 0.2 + b.position.z * 0.2);
-      mat.emissiveIntensity = pulse;
+      b.traverse?.((child) => {
+        const materials = Array.isArray(child.material) ? child.material : (child.material ? [child.material] : []);
+        for (const mat of materials) {
+          if (mat && 'emissiveIntensity' in mat && mat.opacity > 0.01) mat.emissiveIntensity = pulse;
+        }
+      });
     }
 
   // Smoke update
