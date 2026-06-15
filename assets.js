@@ -1,0 +1,20 @@
+export const ASSETS = {
+  road: './road.glb',
+  house1: './house1.glb',
+  factory: './factory.glb',
+  tower: './tower.glb',
+  shop: './shop.glb',
+  house2: './house2.glb',
+  apartment: './apartment.glb',
+  clockTower: './clock_tower.glb',
+  skyscraper: './skyscraper.glb',
+  hospital: './hospital.glb',
+  fireStation: './fire_station.glb',
+  school: './school.glb',
+  library: './library.glb',
+  bakery: './bakery.glb',
+  treeA: './tree_a.glb',
+  treeB: './tree_b.glb',
+  flowerGarden: './flower_garden.glb',
+  park: './park.glb'
+};

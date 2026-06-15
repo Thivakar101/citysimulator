@@ -1,160 +1,14 @@
-// Three.js City Builder - 3D mesmerizing version
-// No build tools required; uses global THREE from CDN.
-
-// Clash-of-Clans style camera controller: left-drag to pan, wheel to zoom, fixed tilt and yaw
-class CoCCameraController {
-  constructor(camera, domElement) {
-    this.camera = camera;
-    this.domElement = domElement;
-    this.enabled = true;
-    this.pitch = THREE.MathUtils.degToRad(55); // fixed tilt
-    this.yaw = -Math.PI / 4; // isometric yaw
-    this.distance = 40; // starting distance
-    this.minDistance = 12;
-    this.maxDistance = 120;
-    this.panSpeed = 0.0025; // pixels -> world scale
-    this.zoomSpeed = 0.0015; // wheel delta -> distance
-    this.target = new THREE.Vector3();
-    this.bounds = { minX: -Infinity, maxX: Infinity, minZ: -Infinity, maxZ: Infinity };
-
-    this._dragging = false;
-    this.hasDragged = false;
-    this._last = new THREE.Vector2();
-
-    // Mouse events
-    this._onMouseDown = (e) => {
-      if (!this.enabled || e.button !== 0) return; // left button pans
-      this._dragging = true;
-      this.hasDragged = false;
-      this.domElement.style.cursor = 'grabbing';
-      this._last.set(e.clientX, e.clientY);
-    };
-    this._onMouseMove = (e) => {
-      if (!this.enabled || !this._dragging) return;
-      const dx = e.clientX - this._last.x;
-      const dy = e.clientY - this._last.y;
-      if (Math.hypot(dx, dy) > 2) {
-        this.hasDragged = true;
-      }
-      this._pan(dx, dy);
-      this._last.set(e.clientX, e.clientY);
-    };
-    this._onMouseUp = () => { this._dragging = false; this.domElement.style.cursor = 'default'; };
-    this._onWheel = (e) => {
-      if (!this.enabled) return;
-      e.preventDefault();
-      const factor = Math.exp(e.deltaY * this.zoomSpeed);
-      this.setDistance(this.distance * factor);
-    };
-    this._onContextMenu = (e) => e.preventDefault();
-
-    // Touch: one finger pan, two finger pinch zoom
-    this._touchState = { active: false, last: null, pinchDist: 0 };
-    this._onTouchStart = (e) => {
-      if (!this.enabled) return;
-      this.hasDragged = false;
-      if (e.touches.length === 1) {
-        const t = e.touches[0];
-        this._touchState.active = true; this._touchState.last = { x: t.clientX, y: t.clientY };
-      } else if (e.touches.length === 2) {
-        this._touchState.active = false; // pinch mode
-        this._touchState.pinchDist = this._touchDistance(e.touches[0], e.touches[1]);
-      }
-    };
-    this._onTouchMove = (e) => {
-      if (!this.enabled) return;
-      if (e.touches.length === 1 && this._touchState.active) {
-        const t = e.touches[0];
-        const dx = t.clientX - this._touchState.last.x;
-        const dy = t.clientY - this._touchState.last.y;
-        if (Math.hypot(dx, dy) > 2) {
-          this.hasDragged = true;
-        }
-        this._pan(dx, dy);
-        this._touchState.last = { x: t.clientX, y: t.clientY };
-      } else if (e.touches.length === 2) {
-        this.hasDragged = true;
-        const d = this._touchDistance(e.touches[0], e.touches[1]);
-        const delta = d - this._touchState.pinchDist;
-        this._touchState.pinchDist = d;
-        const factor = Math.exp(-delta * 0.003); // invert for natural pinch
-        this.setDistance(this.distance * factor);
-      }
-      e.preventDefault();
-    };
-    this._onTouchEnd = () => { this._touchState.active = false; };
-
-    domElement.addEventListener('contextmenu', this._onContextMenu);
-    domElement.addEventListener('mousedown', this._onMouseDown);
-    window.addEventListener('mousemove', this._onMouseMove);
-    window.addEventListener('mouseup', this._onMouseUp);
-    domElement.addEventListener('wheel', this._onWheel, { passive: false });
-    domElement.addEventListener('touchstart', this._onTouchStart, { passive: false });
-    domElement.addEventListener('touchmove', this._onTouchMove, { passive: false });
-    domElement.addEventListener('touchend', this._onTouchEnd);
-  }
-
-  dispose() {
-    const el = this.domElement;
-    el.removeEventListener('contextmenu', this._onContextMenu);
-    el.removeEventListener('mousedown', this._onMouseDown);
-    window.removeEventListener('mousemove', this._onMouseMove);
-    window.removeEventListener('mouseup', this._onMouseUp);
-    el.removeEventListener('wheel', this._onWheel);
-    el.removeEventListener('touchstart', this._onTouchStart);
-    el.removeEventListener('touchmove', this._onTouchMove);
-    el.removeEventListener('touchend', this._onTouchEnd);
-  }
-
-  setTarget(v3) { this.target.copy(v3); this._updateCamera(); }
-  setDistance(d) { this.distance = THREE.MathUtils.clamp(d, this.minDistance, this.maxDistance); this._updateCamera(); }
-  setBounds(b) { this.bounds = { ...this.bounds, ...b }; this._clampTarget(); this._updateCamera(); }
-
-  _touchDistance(a, b) { const dx = a.clientX - b.clientX; const dy = a.clientY - b.clientY; return Math.hypot(dx, dy); }
-
-  _pan(dx, dy) {
-    const scale = this.distance * this.panSpeed;
-    // Camera right and forward projected to XZ
-    const right = new THREE.Vector3();
-    this.camera.getWorldDirection(right); // this returns forward; we derive right via cross with up
-    const forward = right.clone();
-    right.crossVectors(new THREE.Vector3(0,1,0), forward).normalize();
-    forward.y = 0; forward.normalize();
-    // Move opposite to screen motion for right; same for forward (drag up moves forward)
-    const move = new THREE.Vector3()
-      .addScaledVector(right, -dx * scale)
-      .addScaledVector(forward, dy * scale);
-    this.target.add(move);
-    this._clampTarget();
-    this._updateCamera();
-  }
-
-  _clampTarget() {
-    this.target.x = THREE.MathUtils.clamp(this.target.x, this.bounds.minX, this.bounds.maxX);
-    this.target.z = THREE.MathUtils.clamp(this.target.z, this.bounds.minZ, this.bounds.maxZ);
-  }
-
-  _updateCamera() {
-    const cosP = Math.cos(this.pitch), sinP = Math.sin(this.pitch);
-    const dir = new THREE.Vector3(Math.cos(this.yaw) * cosP, sinP, Math.sin(this.yaw) * cosP);
-    const pos = this.target.clone().addScaledVector(dir, this.distance);
-    this.camera.position.copy(pos);
-    this.camera.lookAt(this.target);
-  }
-
-  update() { /* no-op; camera updates applied on interactions */ }
-}
+import * as THREE from 'three';
+import { CoCCameraController } from './camera.js';
+import { ASSETS } from './assets.js';
 
 class City3DGame {
-  constructor({ containerId, gridSize = 5, cellSize = 6, buildingCost = 50, coinIncrement = 10 }) {
+  constructor({ containerId, gridSize = 5, cellSize = 6 }) {
     this.container = document.getElementById(containerId);
     this.gridSize = gridSize;
     this.cellSize = cellSize; // world units per cell (meters)
-    this.buildingCost = buildingCost;
-    this.coinIncrement = coinIncrement;
-    this.expandCost = 100;
 
-  this.coins = 0;
+  this.happinessPoints = 0;
   this.population = 0;
   this.happiness = 1.0; // 0..1
   this.level = 1;
@@ -166,10 +20,8 @@ class City3DGame {
   this.currentPlacement = null; // { type, cost }
   this.isRelocating = null; // building being moved
   this.textureCache = {};
-  this.houseAssetUrl = './building.glb';
-  this.houseAssetPromise = null;
-  this.houseAssetScene = null;
-  this.houseAssetBaseRotation = Math.PI / 2; // turn the custom house asset left
+  this.assetScenes = {};
+  this.assetPromises = {};
   this.placementRotation = 0; // radians; used during placement
   this.smokePuffs = [];
   this._lastTime = performance.now() * 0.001;
@@ -303,38 +155,70 @@ class City3DGame {
   this.controls.setDistance(Math.max(planeSize * 0.9, 26));
 
     // UI refs
-  this.coinTextEl = document.getElementById('coinText') || null;
-  this.popTextEl = document.getElementById('popText') || null;
+  this.levelTextEl = document.getElementById('levelText') || null;
+  this.progressTextEl = document.getElementById('progressText') || null;
+  this.happyPointsTextEl = document.getElementById('happinessPointsText') || null;
   this.happyTextEl = document.getElementById('happyText') || null;
-  this.getCoinsBtn = document.getElementById('getCoinsBtn') || null;
-  this.expandCityBtn = document.getElementById('expandCityBtn') || null;
     // Store buttons
     this.ui = {
       buyRoad: document.getElementById('buyRoad'),
-      buyHouse: document.getElementById('buyHouse'),
-      buyTower: document.getElementById('buyTower'),
+      buyHouse1: document.getElementById('buyHouse1'),
       buyFactory: document.getElementById('buyFactory'),
+      buyTower: document.getElementById('buyTower'),
+      buyShop: document.getElementById('buyShop'),
+      buyHouse2: document.getElementById('buyHouse2'),
+      buyApartment: document.getElementById('buyApartment'),
+      buyClockTower: document.getElementById('buyClockTower'),
+      buySkyscraper: document.getElementById('buySkyscraper'),
+      buyHospital: document.getElementById('buyHospital'),
+      buyFireStation: document.getElementById('buyFireStation'),
+      buySchool: document.getElementById('buySchool'),
+      buyLibrary: document.getElementById('buyLibrary'),
+      buyBakery: document.getElementById('buyBakery'),
+      buyTreeA: document.getElementById('buyTreeA'),
+      buyTreeB: document.getElementById('buyTreeB'),
+      buyFlowerGarden: document.getElementById('buyFlowerGarden'),
       buyPark: document.getElementById('buyPark'),
       cancelPlacement: document.getElementById('cancelPlacement')
     };
 
-    // Hook buttons
-    if (this.getCoinsBtn) {
-      this.getCoinsBtn.addEventListener('click', () => {
-        this.coins += this.coinIncrement;
-        this._updateUI();
-      });
-    }
-    if (this.expandCityBtn) {
-      this.expandCityBtn.addEventListener('click', () => this._tryExpandCity());
-    }
+  // Hook getHappinessBtn
+  const getHappyBtn = document.getElementById('getHappinessBtn');
+  if (getHappyBtn) {
+    getHappyBtn.addEventListener('click', () => {
+      this.happinessPoints += 10;
+      this._updateUI();
+      this._feed('Earned 10 Happiness Points!');
+    });
+  }
+  
+  // Level 1
+  this._hookStore('buyHouse1', { type: 'house1', cost: 0 });
+  this._hookStore('buyFactory', { type: 'factory', cost: 0 });
+  this._hookStore('buyTower', { type: 'tower', cost: 0 });
+  this._hookStore('buyShop', { type: 'shop', cost: 0 });
+  
+  // Level 2
+  this._hookStore('buyHouse2', { type: 'house2', cost: 0 });
+  this._hookStore('buyApartment', { type: 'apartment', cost: 0 });
+  this._hookStore('buyClockTower', { type: 'clockTower', cost: 0 });
+  
+  // Level 3
+  this._hookStore('buySkyscraper', { type: 'skyscraper', cost: 0 });
+  this._hookStore('buyHospital', { type: 'hospital', cost: 0 });
+  this._hookStore('buyFireStation', { type: 'fireStation', cost: 0 });
 
-  // Hook store selections
-  this._hookStore('buyRoad', { type: 'road', cost: 5 });
-  this._hookStore('buyHouse', { type: 'house', cost: 50 });
-  this._hookStore('buyTower', { type: 'tower', cost: 75 });
-  this._hookStore('buyFactory', { type: 'factory', cost: 100 });
-  this._hookStore('buyPark', { type: 'park', cost: 30 });
+  // Level 4
+  this._hookStore('buySchool', { type: 'school', cost: 0 });
+  this._hookStore('buyLibrary', { type: 'library', cost: 0 });
+  this._hookStore('buyBakery', { type: 'bakery', cost: 0 });
+
+  // Happiness Shop (Costs happiness points)
+  this._hookStore('buyTreeA', { type: 'treeA', cost: 10, isDecoration: true });
+  this._hookStore('buyTreeB', { type: 'treeB', cost: 15, isDecoration: true });
+  this._hookStore('buyFlowerGarden', { type: 'flowerGarden', cost: 25, isDecoration: true });
+  this._hookStore('buyPark', { type: 'park', cost: 50, isDecoration: true });
+
   if (this.ui.cancelPlacement) this.ui.cancelPlacement.addEventListener('click', () => this._cancelPlacement());
 
   // Mouse interactions for placement and moving
@@ -436,11 +320,6 @@ class City3DGame {
       mesh.position.set(pos.x, mesh.position.y, pos.z);
       mesh.userData.grid = { col, row };
       this.grid[row][col] = mesh;
-      // If moving a road, refresh road textures around old and new spots
-      if (mesh.userData.type === 'road') {
-        if (prev) this._refreshRoadAndNeighbors(prev.row, prev.col);
-        this._refreshRoadAndNeighbors(row, col);
-      }
       // If moving a park, move its people (respawn at new location)
       if (mesh.userData.type === 'park') {
         this._removePeopleForPark(mesh);
@@ -456,29 +335,32 @@ class City3DGame {
 
     if (!this.currentPlacement) return;
   if (this.grid[row][col]) return; // occupied
-    if (this.coins < this.currentPlacement.cost) return; // not enough coins
-
-
+    if (this.currentPlacement.isDecoration && this.happinessPoints < this.currentPlacement.cost) {
+      this._toastAtCell(row, col, "Not enough Happiness Points!");
+      return; // not enough points
+    }
 
     const mesh = this._createBuildingMesh(this.currentPlacement.type);
     const pos = this._gridToWorld(col, row);
     mesh.position.set(pos.x, mesh.position.y, pos.z);
     mesh.rotation.y = this.currentPlacement.type === 'road' ? 0 : this.placementRotation;
-    mesh.userData = { type: this.currentPlacement.type, grid: { col, row } };
+    mesh.userData = { type: this.currentPlacement.type, grid: { col, row }, isDecoration: this.currentPlacement.isDecoration };
     this.scene.add(mesh);
     this.buildings.push(mesh);
     this.grid[row][col] = mesh;
-    this.coins -= this.currentPlacement.cost;
-    // If road, auto-connect lines by updating mask textures for this and neighbors
-    if (mesh.userData.type === 'road') {
-      this._refreshRoadAndNeighbors(row, col);
+    
+    if (this.currentPlacement.isDecoration) {
+      this.happinessPoints -= this.currentPlacement.cost;
+    } else if (this.currentPlacement.type !== 'road') {
+      // Building things gives small amount of happiness points
+      this.happinessPoints += 2;
     }
+
     // If park, spawn people
     if (mesh.userData.type === 'park') {
       this._spawnPeopleForPark(mesh, row, col);
     }
 
-    // Water: no coin cost; acts as decorative tile
     this._recomputeCityStats();
     this._updateUI();
     this._feed(`Placed ${mesh.userData.type}`);
@@ -539,86 +421,32 @@ class City3DGame {
       factory: 1.0,
       park: 0.2,
     };
-    const colorBy = {
-      road: 0x2f2f36,
-      house: 0xcfd8e3,
-      tower: 0xbfc7ff,
-      factory: 0xe6b691,
-      park: 0x6fe39b,
-      water: 0x2aa6b8,
-    };
     const h = (this.cellSize) * (heightBy[type] || 1.0);
-    let geo, mat, mesh;
-  if (type === 'house') {
-      mesh = this._createHouseAssetMesh(ghost, h);
-  } else if (type === 'road') {
-  // Road tile; keep visuals aligned with two-lane movement
-  geo = new THREE.BoxGeometry(this.cellSize * 0.98, h, this.cellSize * 0.98);
-  const roadTopTex = this._getRoadTexture();
-      const topMat = new THREE.MeshStandardMaterial({ map: roadTopTex, roughness: 0.95, metalness: 0.05, color: 0xffffff, opacity: ghost ? 0.6 : 1, transparent: ghost });
-      const sideMat = new THREE.MeshStandardMaterial({ color: 0x252a32, roughness: 1.0, metalness: 0.0, opacity: ghost ? 0.6 : 1, transparent: ghost });
-      // Order: [right,left,top,bottom,front,back]
-      const mats = [sideMat, sideMat, topMat, sideMat, sideMat, sideMat];
-      mesh = new THREE.Mesh(geo, mats);
-  mesh.position.y = h / 2 + 0.001;
-  mesh.receiveShadow = true;
-  // For auto-connecting roads we keep rotation 0; texture adapts based on neighbors
-  mesh.rotation.y = 0;
-  } else if (type === 'park') {
-      // Green tile with a simple tree
-      const tileGeo = new THREE.BoxGeometry(this.cellSize * 0.98, h, this.cellSize * 0.98);
-      const grassMat = new THREE.MeshStandardMaterial({ color: 0x2f7d44, roughness: 1.0, metalness: 0.0, opacity: ghost ? 0.6 : 1, transparent: ghost });
-      const sideMat = new THREE.MeshStandardMaterial({ color: 0x2a5f39, roughness: 1.0, metalness: 0.0, opacity: ghost ? 0.6 : 1, transparent: ghost });
-      mesh = new THREE.Mesh(tileGeo, [sideMat, sideMat, grassMat, sideMat, sideMat, sideMat]);
-      mesh.position.y = h / 2;
-      mesh.receiveShadow = true;
-      if (!ghost) {
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(this.cellSize*0.06, this.cellSize*0.08, this.cellSize*0.35, 8), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
-        const leaves = new THREE.Mesh(new THREE.ConeGeometry(this.cellSize*0.22, this.cellSize*0.38, 12), new THREE.MeshStandardMaterial({ color: 0x3aa45f }));
-        trunk.position.set(this.cellSize*0.18, h + this.cellSize*0.175, this.cellSize*0.18);
-        leaves.position.set(trunk.position.x, trunk.position.y + this.cellSize*0.26, trunk.position.z);
-        trunk.castShadow = true; leaves.castShadow = true; leaves.receiveShadow = true;
-        mesh.add(trunk); mesh.add(leaves);
-      }
+    return this._createAssetMesh(type, ghost, h);
+  }
 
-    } else {
-      // buildings with windowed facades and roof top
-      geo = new THREE.BoxGeometry(this.cellSize * 0.9, h, this.cellSize * 0.9);
-      const facadeTex = this._getFacadeTexture(type);
-      facadeTex.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy?.() || 4);
-      const sideMat = new THREE.MeshStandardMaterial({ map: facadeTex, color: 0xffffff, roughness: 0.55, metalness: 0.2, emissive: 0xffffff, emissiveMap: ghost ? null : facadeTex, emissiveIntensity: ghost ? 0.0 : 0.35, opacity: ghost ? 0.6 : 1, transparent: ghost });
-      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8d8f96, roughness: 0.9, metalness: 0.1, opacity: ghost ? 0.6 : 1, transparent: ghost });
-      const bottomMat = new THREE.MeshStandardMaterial({ color: 0x20232b });
-      // Order: [right,left,top,bottom,front,back]
-      mesh = new THREE.Mesh(geo, [sideMat, sideMat, roofMat, bottomMat, sideMat, sideMat]);
-      mesh.position.y = h / 2;
-      mesh.castShadow = true; mesh.receiveShadow = true;
-      if (!ghost) {
-        if (type === 'factory') {
-          // Factory hall extension
-          const hall = new THREE.Mesh(new THREE.BoxGeometry(this.cellSize*0.9, h*0.55, this.cellSize*0.5), new THREE.MeshStandardMaterial({ color: 0xbfb7ab, roughness: 0.8 }));
-          hall.position.set(0, -h*0.2, -this.cellSize*0.15);
-          hall.castShadow = true; hall.receiveShadow = true; mesh.add(hall);
-          // Chimneys
-          const pipeMat = new THREE.MeshStandardMaterial({ color: 0x9d9fa8, roughness: 0.5, metalness: 0.5 });
-          const mkChimney = (x,z,hMul=1) => {
-            const ch = new THREE.Mesh(new THREE.CylinderGeometry(this.cellSize*0.08, this.cellSize*0.12, h*0.7*hMul, 12), pipeMat);
-            ch.position.set(x, h*0.55, z);
-            ch.castShadow = true; ch.receiveShadow = true;
-            const cap = new THREE.Mesh(new THREE.CylinderGeometry(this.cellSize*0.14, this.cellSize*0.14, this.cellSize*0.04, 16), new THREE.MeshStandardMaterial({ color: 0x585b63, roughness: 0.9 }));
-            cap.position.y = h*0.35;
-            ch.add(cap);
-            mesh.add(ch);
-            this._emitSmoke(ch);
-          };
-          mkChimney(this.cellSize*0.18, this.cellSize*0.05, 1.0);
-          mkChimney(-this.cellSize*0.18, this.cellSize*0.1, 0.85);
-          // Rooftop vents
-          const vent = new THREE.Mesh(new THREE.CylinderGeometry(this.cellSize*0.06, this.cellSize*0.06, this.cellSize*0.12, 10), new THREE.MeshStandardMaterial({ color: 0x6a6d75 }));
-          vent.position.set(this.cellSize*0.0, h*0.55, -this.cellSize*0.28); vent.castShadow = true; vent.receiveShadow = true; mesh.add(vent);
-        }
-      }
-    }
+  _createAssetMesh(type, ghost, fallbackHeight) {
+    const mesh = new THREE.Group();
+    mesh.userData.assetType = type;
+
+    // Build the procedural kid-friendly fallback first
+    const procedural = this._buildProceduralFallback(type, ghost);
+    mesh.add(procedural);
+
+    this._loadAsset(type)
+      .then((assetScene) => {
+        if (!assetScene) return; // stick with procedural
+        const model = assetScene.clone(true);
+        model.name = `${type} asset`;
+        this._prepareAssetModel(model, ghost, type);
+        // Replace procedural with loaded model
+        mesh.remove(procedural);
+        mesh.add(model);
+      })
+      .catch((err) => {
+        console.warn(`Could not load asset for ${type}, keeping procedural fallback.`, err.message);
+      });
+
     if (!ghost) {
       // pop-in animation
       mesh.scale.y = 0.01;
@@ -629,59 +457,305 @@ class City3DGame {
     return mesh;
   }
 
-  _createHouseAssetMesh(ghost, fallbackHeight) {
-    const pickHeight = Math.max(fallbackHeight, this.cellSize * 1.1);
-    const pickGeo = new THREE.BoxGeometry(this.cellSize * 0.88, pickHeight, this.cellSize * 0.88);
-    pickGeo.translate(0, pickHeight / 2, 0);
-    const pickMat = new THREE.MeshStandardMaterial({
-      color: ghost ? 0xcfd8e3 : 0xffffff,
-      roughness: 0.7,
-      metalness: 0.0,
-      opacity: ghost ? 0.35 : 0.001,
-      transparent: true,
-      depthWrite: !!ghost,
-    });
-    const mesh = new THREE.Mesh(pickGeo, pickMat);
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    mesh.userData.assetType = 'house-glb';
+  async _loadAsset(type) {
+    if (!this.assetScenes) this.assetScenes = {};
+    if (!this.assetPromises) this.assetPromises = {};
+    
+    if (this.assetScenes[type]) return Promise.resolve(this.assetScenes[type]);
+    if (this.assetPromises[type]) return this.assetPromises[type];
 
-    this._loadHouseAsset()
-      .then((assetScene) => {
-        if (!assetScene) return;
-        const model = assetScene.clone(true);
-        model.name = 'building.glb house asset';
-        this._prepareHouseAssetModel(model, ghost);
-        mesh.add(model);
-      })
-      .catch((err) => {
-        console.warn('Could not load building.glb for house asset:', err);
-        this._addFallbackHouse(mesh, fallbackHeight, ghost);
-      });
+    const url = ASSETS[type];
+    if (!url) return Promise.reject(new Error(`No asset mapping for ${type}`));
 
-    return mesh;
-  }
+    // Immediately reject placeholder URLs
+    if (url.includes('.glb') && (url === './.glb' || url.startsWith('./placeholder') || url.includes('house') || url.includes('factory') || url.includes('tower') || url.includes('shop') || url.includes('clock') || url.includes('sky') || url.includes('hosp') || url.includes('fire') || url.includes('school') || url.includes('lib') || url.includes('bakery') || url.includes('tree') || url.includes('flower') || url.includes('park') || url.includes('apart'))) {
+      // If the file doesn't actually exist on the user's system, we want to immediately fallback.
+      // For this sandbox we will assume any local `./name.glb` that isn't explicitly known to exist should fallback.
+      // We will try to fetch it, but if it 404s, we catch and fallback gracefully.
+    }
 
-  async _loadHouseAsset() {
-    if (this.houseAssetScene) return Promise.resolve(this.houseAssetScene);
-    if (this.houseAssetPromise) return this.houseAssetPromise;
-    this.houseAssetPromise = import('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/loaders/GLTFLoader.js')
+    this.assetPromises[type] = import('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/loaders/GLTFLoader.js')
       .then(({ GLTFLoader }) => new Promise((resolve, reject) => {
         const loader = new GLTFLoader();
-      loader.load(
-        this.houseAssetUrl,
-        (gltf) => {
-          this.houseAssetScene = gltf.scene;
-          resolve(this.houseAssetScene);
-        },
-        undefined,
-        reject
-      );
-      }));
-    return this.houseAssetPromise;
+        loader.load(
+          url,
+          (gltf) => {
+            this.assetScenes[type] = gltf.scene;
+            resolve(gltf.scene);
+          },
+          undefined,
+          (err) => {
+            console.warn(`Error loading GLB for ${type} at ${url}. Using fallback.`);
+            resolve(null); // Resolve to null to use procedural fallback instead of rejecting entirely
+          }
+        );
+      })).catch(err => {
+         console.warn(`Fallback to procedural for ${type}.`, err.message);
+         return null;
+      });
+    return this.assetPromises[type];
   }
 
-  _prepareHouseAssetModel(model, ghost) {
+  _buildProceduralFallback(type, ghost) {
+    const group = new THREE.Group();
+    // Rotate to face camera
+    group.rotation.y = Math.PI;
+    
+    const cellSize = this.cellSize;
+    const baseSize = cellSize * 0.85;
+    
+    // Kid-friendly material helper
+    const getMat = (colorHex) => {
+      return new THREE.MeshStandardMaterial({
+        color: ghost ? 0xcfd8e3 : colorHex,
+        roughness: 0.6,
+        metalness: 0.1,
+        opacity: ghost ? 0.35 : 1.0,
+        transparent: !!ghost,
+        depthWrite: !ghost,
+      });
+    };
+    
+    const winMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1, emissive: 0xffffff, emissiveIntensity: 0.15, roughness: 0.2, metalness: 0.8 });
+    const createWin = (w, h, x, y, z) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.1), winMat);
+      mesh.position.set(x, y, z);
+      return mesh;
+    };
+
+    let meshes = [];
+
+    switch (type) {
+      case 'house1': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.8, cellSize * 0.8, baseSize * 0.8);
+        const body = new THREE.Mesh(bodyGeo, getMat(0xffe2b3));
+        body.position.y = cellSize * 0.4;
+        
+        const roofGeo = new THREE.ConeGeometry(baseSize * 0.6, cellSize * 0.5, 4);
+        const roof = new THREE.Mesh(roofGeo, getMat(0xff6b6b));
+        roof.position.y = cellSize * 0.8 + cellSize * 0.25;
+        roof.rotation.y = Math.PI / 4;
+        
+        // Window
+        meshes.push(body, roof, createWin(cellSize*0.3, cellSize*0.3, 0, cellSize*0.4, baseSize*0.4));
+        break;
+      }
+      case 'house2': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.9, cellSize * 1.0, baseSize * 0.7);
+        const body = new THREE.Mesh(bodyGeo, getMat(0xa3e4d7));
+        body.position.y = cellSize * 0.5;
+        const roofGeo = new THREE.BoxGeometry(baseSize * 1.0, cellSize * 0.2, baseSize * 0.8);
+        const roof = new THREE.Mesh(roofGeo, getMat(0xf1c40f));
+        roof.position.y = cellSize * 1.1;
+        
+        // Windows
+        meshes.push(body, roof, createWin(cellSize*0.25, cellSize*0.3, baseSize*0.25, cellSize*0.5, baseSize*0.35), createWin(cellSize*0.25, cellSize*0.3, -baseSize*0.25, cellSize*0.5, baseSize*0.35));
+        break;
+      }
+      case 'factory': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize, cellSize * 0.7, baseSize);
+        const body = new THREE.Mesh(bodyGeo, getMat(0xe67e22));
+        body.position.y = cellSize * 0.35;
+        const pipeGeo = new THREE.CylinderGeometry(cellSize*0.1, cellSize*0.1, cellSize*0.8, 8);
+        const pipe1 = new THREE.Mesh(pipeGeo, getMat(0xbdc3c7));
+        pipe1.position.set(baseSize*0.3, cellSize*0.9, baseSize*0.2);
+        const pipe2 = new THREE.Mesh(pipeGeo, getMat(0xbdc3c7));
+        pipe2.position.set(-baseSize*0.1, cellSize*0.9, -baseSize*0.2);
+        
+        // Windows
+        meshes.push(body, pipe1, pipe2, createWin(cellSize*0.4, cellSize*0.3, 0, cellSize*0.4, baseSize*0.5));
+        break;
+      }
+      case 'tower': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.6, cellSize * 1.8, baseSize * 0.6);
+        const body = new THREE.Mesh(bodyGeo, getMat(0x3498db));
+        body.position.y = cellSize * 0.9;
+        const topGeo = new THREE.SphereGeometry(baseSize * 0.35, 16, 16);
+        const top = new THREE.Mesh(topGeo, getMat(0xf1c40f));
+        top.position.y = cellSize * 1.8 + baseSize * 0.3;
+        meshes.push(body, top);
+        
+        // Tower Windows
+        for (let i = 0; i < 3; i++) {
+            meshes.push(createWin(cellSize*0.25, cellSize*0.25, 0, cellSize*0.5 + i*cellSize*0.4, baseSize*0.3));
+        }
+        break;
+      }
+      case 'shop': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.9, cellSize * 0.6, baseSize * 0.9);
+        const body = new THREE.Mesh(bodyGeo, getMat(0x9b59b6));
+        body.position.y = cellSize * 0.3;
+        const signGeo = new THREE.BoxGeometry(baseSize * 0.7, cellSize * 0.3, cellSize * 0.1);
+        const sign = new THREE.Mesh(signGeo, getMat(0xf1c40f));
+        sign.position.set(0, cellSize * 0.75, baseSize * 0.45);
+        meshes.push(body, sign, createWin(cellSize*0.6, cellSize*0.3, 0, cellSize*0.25, baseSize*0.45));
+        break;
+      }
+      case 'apartment': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.8, cellSize * 1.5, baseSize * 0.8);
+        const body = new THREE.Mesh(bodyGeo, getMat(0xe74c3c));
+        body.position.y = cellSize * 0.75;
+        meshes.push(body);
+        for (let i = 0; i < 3; i++) {
+            meshes.push(createWin(cellSize*0.2, cellSize*0.2, -baseSize*0.2, cellSize*0.4 + i*cellSize*0.4, baseSize*0.4));
+            meshes.push(createWin(cellSize*0.2, cellSize*0.2, baseSize*0.2, cellSize*0.4 + i*cellSize*0.4, baseSize*0.4));
+        }
+        break;
+      }
+      case 'clockTower': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.5, cellSize * 2.0, baseSize * 0.5);
+        const body = new THREE.Mesh(bodyGeo, getMat(0xecf0f1));
+        body.position.y = cellSize * 1.0;
+        const clockGeo = new THREE.CylinderGeometry(cellSize*0.2, cellSize*0.2, cellSize*0.05, 16);
+        const clock = new THREE.Mesh(clockGeo, getMat(0xf39c12));
+        clock.rotation.x = Math.PI / 2;
+        clock.position.set(0, cellSize * 1.7, baseSize * 0.26);
+        const roofGeo = new THREE.ConeGeometry(baseSize * 0.4, cellSize * 0.6, 4);
+        const roof = new THREE.Mesh(roofGeo, getMat(0xc0392b));
+        roof.position.y = cellSize * 2.3;
+        roof.rotation.y = Math.PI / 4;
+        meshes.push(body, clock, roof, createWin(cellSize*0.15, cellSize*0.5, 0, cellSize*1.0, baseSize*0.25));
+        break;
+      }
+      case 'skyscraper': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.7, cellSize * 3.0, baseSize * 0.7);
+        const body = new THREE.Mesh(bodyGeo, getMat(0x2ecc71));
+        body.position.y = cellSize * 1.5;
+        meshes.push(body);
+        for (let i = 0; i < 6; i++) {
+            meshes.push(createWin(cellSize*0.4, cellSize*0.2, 0, cellSize*0.5 + i*cellSize*0.4, baseSize*0.35));
+        }
+        break;
+      }
+      case 'hospital': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 1.0, cellSize * 1.2, baseSize * 0.8);
+        const body = new THREE.Mesh(bodyGeo, getMat(0xffffff));
+        body.position.y = cellSize * 0.6;
+        const crossGeo1 = new THREE.BoxGeometry(cellSize*0.4, cellSize*0.15, cellSize*0.05);
+        const cross1 = new THREE.Mesh(crossGeo1, getMat(0xe74c3c));
+        cross1.position.set(0, cellSize*1.4, baseSize*0.4);
+        const crossGeo2 = new THREE.BoxGeometry(cellSize*0.15, cellSize*0.4, cellSize*0.05);
+        const cross2 = new THREE.Mesh(crossGeo2, getMat(0xe74c3c));
+        cross2.position.set(0, cellSize*1.4, baseSize*0.4);
+        meshes.push(body, cross1, cross2);
+        
+        for (let i = 0; i < 2; i++) {
+            meshes.push(createWin(cellSize*0.25, cellSize*0.25, -baseSize*0.25, cellSize*0.4 + i*cellSize*0.4, baseSize*0.4));
+            meshes.push(createWin(cellSize*0.25, cellSize*0.25, baseSize*0.25, cellSize*0.4 + i*cellSize*0.4, baseSize*0.4));
+        }
+        break;
+      }
+      case 'fireStation': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.9, cellSize * 0.8, baseSize * 0.9);
+        const body = new THREE.Mesh(bodyGeo, getMat(0xc0392b));
+        body.position.y = cellSize * 0.4;
+        const doorGeo = new THREE.BoxGeometry(baseSize * 0.4, cellSize * 0.5, cellSize * 0.05);
+        const door = new THREE.Mesh(doorGeo, getMat(0x34495e));
+        door.position.set(0, cellSize * 0.25, baseSize * 0.46);
+        meshes.push(body, door, createWin(cellSize*0.2, cellSize*0.2, -baseSize*0.3, cellSize*0.5, baseSize*0.45), createWin(cellSize*0.2, cellSize*0.2, baseSize*0.3, cellSize*0.5, baseSize*0.45));
+        break;
+      }
+      case 'school': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 1.0, cellSize * 0.9, baseSize * 0.6);
+        const body = new THREE.Mesh(bodyGeo, getMat(0xf39c12));
+        body.position.y = cellSize * 0.45;
+        const bellGeo = new THREE.BoxGeometry(cellSize*0.3, cellSize*0.3, cellSize*0.3);
+        const bell = new THREE.Mesh(bellGeo, getMat(0xd35400));
+        bell.position.y = cellSize * 1.05;
+        meshes.push(body, bell);
+        for (let i = 0; i < 3; i++) {
+            meshes.push(createWin(cellSize*0.2, cellSize*0.3, -baseSize*0.3 + i*cellSize*0.3, cellSize*0.5, baseSize*0.3));
+        }
+        break;
+      }
+      case 'library': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.8, cellSize * 1.1, baseSize * 0.8);
+        const body = new THREE.Mesh(bodyGeo, getMat(0x1abc9c));
+        body.position.y = cellSize * 0.55;
+        const roofGeo = new THREE.CylinderGeometry(baseSize * 0.45, baseSize * 0.45, baseSize * 0.8, 16, 1, false, 0, Math.PI);
+        const roof = new THREE.Mesh(roofGeo, getMat(0x34495e));
+        roof.rotation.z = Math.PI / 2;
+        roof.position.y = cellSize * 1.1;
+        meshes.push(body, roof, createWin(cellSize*0.4, cellSize*0.5, 0, cellSize*0.6, baseSize*0.4));
+        break;
+      }
+      case 'bakery': {
+        const bodyGeo = new THREE.BoxGeometry(baseSize * 0.7, cellSize * 0.7, baseSize * 0.7);
+        const body = new THREE.Mesh(bodyGeo, getMat(0xd35400));
+        body.position.y = cellSize * 0.35;
+        const roofGeo = new THREE.SphereGeometry(baseSize * 0.35, 16, 8, 0, Math.PI*2, 0, Math.PI/2);
+        const roof = new THREE.Mesh(roofGeo, getMat(0xf1c40f));
+        roof.position.y = cellSize * 0.7;
+        meshes.push(body, roof, createWin(cellSize*0.4, cellSize*0.3, 0, cellSize*0.35, baseSize*0.35));
+        break;
+      }
+      case 'treeA': {
+        const trunkGeo = new THREE.CylinderGeometry(cellSize*0.08, cellSize*0.1, cellSize*0.5, 6);
+        const trunk = new THREE.Mesh(trunkGeo, getMat(0x8e44ad));
+        trunk.position.y = cellSize * 0.25;
+        const leavesGeo = new THREE.SphereGeometry(cellSize*0.35, 8, 8);
+        const leaves = new THREE.Mesh(leavesGeo, getMat(0x2ecc71));
+        leaves.position.y = cellSize * 0.6;
+        meshes.push(trunk, leaves);
+        break;
+      }
+      case 'treeB': {
+        const trunkGeo = new THREE.CylinderGeometry(cellSize*0.06, cellSize*0.06, cellSize*0.6, 6);
+        const trunk = new THREE.Mesh(trunkGeo, getMat(0xd35400));
+        trunk.position.y = cellSize * 0.3;
+        const leavesGeo = new THREE.ConeGeometry(cellSize*0.3, cellSize*0.8, 6);
+        const leaves = new THREE.Mesh(leavesGeo, getMat(0x27ae60));
+        leaves.position.y = cellSize * 0.8;
+        meshes.push(trunk, leaves);
+        break;
+      }
+      case 'flowerGarden': {
+        const baseGeo = new THREE.BoxGeometry(baseSize * 0.8, cellSize * 0.1, baseSize * 0.8);
+        const base = new THREE.Mesh(baseGeo, getMat(0x2ecc71));
+        base.position.y = cellSize * 0.05;
+        const flowerGeo = new THREE.SphereGeometry(cellSize*0.1, 6, 6);
+        const flower1 = new THREE.Mesh(flowerGeo, getMat(0xe74c3c));
+        flower1.position.set(baseSize*0.2, cellSize*0.15, baseSize*0.2);
+        const flower2 = new THREE.Mesh(flowerGeo, getMat(0xf1c40f));
+        flower2.position.set(-baseSize*0.2, cellSize*0.15, -baseSize*0.2);
+        const flower3 = new THREE.Mesh(flowerGeo, getMat(0x9b59b6));
+        flower3.position.set(baseSize*0.2, cellSize*0.15, -baseSize*0.2);
+        meshes.push(base, flower1, flower2, flower3);
+        break;
+      }
+      case 'park': {
+        const baseGeo = new THREE.BoxGeometry(baseSize, cellSize * 0.1, baseSize);
+        const base = new THREE.Mesh(baseGeo, getMat(0x2ecc71));
+        base.position.y = cellSize * 0.05;
+        const fountainGeo = new THREE.CylinderGeometry(cellSize*0.2, cellSize*0.3, cellSize*0.2, 16);
+        const fountain = new THREE.Mesh(fountainGeo, getMat(0xbdc3c7));
+        fountain.position.y = cellSize * 0.15;
+        const waterGeo = new THREE.SphereGeometry(cellSize*0.15, 8, 8);
+        const water = new THREE.Mesh(waterGeo, getMat(0x3498db));
+        water.position.y = cellSize * 0.3;
+        meshes.push(base, fountain, water);
+        break;
+      }
+      default: {
+        // Fallback cube
+        const defGeo = new THREE.BoxGeometry(baseSize * 0.8, cellSize * 0.8, baseSize * 0.8);
+        const defMesh = new THREE.Mesh(defGeo, getMat(0x95a5a6));
+        defMesh.position.y = cellSize * 0.4;
+        meshes.push(defMesh);
+        break;
+      }
+    }
+
+    meshes.forEach(m => {
+      m.castShadow = !ghost;
+      m.receiveShadow = !ghost;
+      group.add(m);
+    });
+
+    return group;
+  }
+
+  _prepareAssetModel(model, ghost, type) {
     model.traverse((child) => {
       if (!child.isMesh) return;
       child.castShadow = true;
@@ -716,80 +790,14 @@ class City3DGame {
     model.position.x -= scaledCenter.x;
     model.position.z -= scaledCenter.z;
     model.position.y -= scaledBox.min.y;
-    model.rotation.y = this.houseAssetBaseRotation;
-  }
-
-  _addFallbackHouse(mesh, h, ghost) {
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(this.cellSize * 0.9, h, this.cellSize * 0.9),
-      new THREE.MeshStandardMaterial({ color: 0xcfd8e3, roughness: 0.55, metalness: 0.2, opacity: ghost ? 0.6 : 1, transparent: ghost })
-    );
-    body.position.y = h / 2;
-    body.castShadow = true;
-    body.receiveShadow = true;
-    const roof = new THREE.Mesh(
-      new THREE.ConeGeometry(this.cellSize * 0.42, this.cellSize * 0.28, 4),
-      new THREE.MeshStandardMaterial({ color: 0xb35c4b, roughness: 0.8, opacity: ghost ? 0.6 : 1, transparent: ghost })
-    );
-    roof.position.y = h + this.cellSize * 0.18;
-    roof.rotation.y = Math.PI / 4;
-    roof.castShadow = true;
-    roof.receiveShadow = true;
-    mesh.add(body);
-    mesh.add(roof);
-  }
-
-  _emitSmoke(originMesh) {
-    // Create a soft billboarded puff that rises and fades
-    const size = 128; const c = document.createElement('canvas'); c.width=c.height=size; const ctx=c.getContext('2d');
-    const grad = ctx.createRadialGradient(size/2,size/2,10,size/2,size/2,size/2);
-    grad.addColorStop(0,'rgba(255,255,255,0.9)'); grad.addColorStop(1,'rgba(255,255,255,0.0)');
-    ctx.fillStyle=grad; ctx.fillRect(0,0,size,size);
-    const tex = new THREE.CanvasTexture(c);
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.0, color: 0xcfd6de });
-    const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(this.cellSize*0.7, this.cellSize*0.7, 1);
-    const wp = new THREE.Vector3(); originMesh.getWorldPosition(wp);
-    sprite.position.copy(wp).add(new THREE.Vector3(0, this.cellSize*0.2, 0));
-    this.scene.add(sprite);
-    this.smokePuffs.push({ sprite, t: 0, life: 2.8 + Math.random()*1.2, drift: new THREE.Vector3((Math.random()-0.5)*0.05, 0.24+Math.random()*0.06, (Math.random()-0.5)*0.05) });
-  }
-
-  _getRoadTexture(mask = 0) {
-    // Cache per-mask texture so lines connect depending on neighbors
-    if (!this.textureCache.road) this.textureCache.road = {};
-    if (this.textureCache.road[mask]) return this.textureCache.road[mask];
-    const makeTex = (m) => {
-      const size = 256; const c = document.createElement('canvas'); c.width = c.height = size; const ctx = c.getContext('2d');
-      // Asphalt base
-      ctx.fillStyle = '#1e2127'; ctx.fillRect(0,0,size,size);
-      const drawVertDash = () => {
-        const dashW = 4, dashH = 24, gap = 16, cx = size/2 - dashW/2;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-        for (let y = 8; y < size - 8; y += dashH + gap) ctx.fillRect(cx, y, dashW, dashH);
-      };
-      const drawHorzDash = () => {
-        const dashW = 24, dashH = 4, gap = 16, cy = size/2 - dashH/2;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-        for (let x = 8; x < size - 8; x += dashW + gap) ctx.fillRect(x, cy, dashW, dashH);
-      };
-      const N=1,E=2,S=4,W=8; const vert = (m & N) || (m & S); const horz = (m & E) || (m & W);
-      if (!vert && !horz) { // default single tile vertical
-        drawVertDash();
-      } else {
-        if (vert) { drawVertDash(); }
-        if (horz) { drawHorzDash(); }
-      }
-      const tex = new THREE.CanvasTexture(c); tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.needsUpdate = true; return tex;
-    };
-    const tex = makeTex(mask);
-    this.textureCache.road[mask] = tex;
-    return tex;
+    
+    if (type === 'house') {
+      model.rotation.y = Math.PI / 2;
+    }
   }
 
   _onKeyDown(e) {
     if (!this.ghost) return;
-    if (this.currentPlacement && this.currentPlacement.type === 'road') return; // auto-connect; ignore rotation for roads
     if (e.key === 'r' || e.key === 'R') {
       this.placementRotation = (this.placementRotation + Math.PI/2) % (Math.PI*2);
       this.ghost.rotation.y = this.placementRotation;
@@ -802,149 +810,6 @@ class City3DGame {
     return !!(m && m.userData && m.userData.type === 'road');
   }
 
-  _computeRoadMask(row, col) {
-    const N=1,E=2,S=4,W=8; let mask=0;
-    if (this._isRoadCell(row-1, col)) mask |= N;
-    if (this._isRoadCell(row, col+1)) mask |= E;
-    if (this._isRoadCell(row+1, col)) mask |= S;
-    if (this._isRoadCell(row, col-1)) mask |= W;
-    return mask;
-  }
-
-  _applyRoadTexture(mesh, row, col) {
-    const mask = this._computeRoadMask(row, col);
-    const tex = this._getRoadTexture(mask);
-    if (Array.isArray(mesh.material)) {
-      const top = mesh.material[2];
-      if (top) { top.map = tex; top.needsUpdate = true; }
-    } else {
-      mesh.material.map = tex; mesh.material.needsUpdate = true;
-    }
-  }
-
-  _refreshRoadAndNeighbors(row, col) {
-    const list = [ {r:row,c:col}, {r:row-1,c:col}, {r:row+1,c:col}, {r:row,c:col-1}, {r:row,c:col+1} ];
-    for (const it of list) {
-      if (!this._isRoadCell(it.r, it.c)) continue;
-      const m = this.grid[it.r][it.c];
-      if (m) {
-        this._applyRoadTexture(m, it.r, it.c);
-        // Rebuild streetlight(s) for this tile based on connectivity
-        this._rebuildStreetLightsForTile(it.r, it.c, m);
-      }
-    }
-  }
-
-  _updateAttachedStreetLight(roadMesh) {
-    if (!roadMesh) return;
-    roadMesh.traverse(n => {
-      if (n.isPointLight) {
-        n.intensity = 0.15;
-      }
-      if (n.material && n.material.emissive) {
-        n.material.emissiveIntensity = 0.05;
-      }
-    });
-  }
-
-  _rebuildStreetLightsForTile(row, col, roadMesh) {
-    if (!roadMesh) return;
-    // Remove any existing lamps on this tile
-    const toRemove = [];
-    roadMesh.children.forEach(ch => { if (ch.userData && ch.userData.kind === 'streetlight') toRemove.push(ch); });
-    for (const n of toRemove) {
-      // Also prune tracked point lights
-      n.traverse(x => {
-        if (x.isPointLight) {
-          const idx = this.streetLightPoints.indexOf(x);
-          if (idx >= 0) this.streetLightPoints.splice(idx, 1);
-        }
-      });
-      roadMesh.remove(n);
-    }
-
-    // Determine road connectivity to choose placement
-    const N=1,E=2,S=4,W=8;
-    const mask = this._computeRoadMask(row, col);
-    const isIntersection = ((mask & N)?1:0)+((mask & E)?1:0)+((mask & S)?1:0)+((mask & W)?1:0) >= 3;
-    if (isIntersection) {
-      // Avoid clutter: place no lamps on 3- or 4-way intersections
-      return;
-    }
-
-    // For straight segments, place one lamp on the right edge, staggered by checksum
-    // For corners (L-shape), place one lamp on the outer corner
-    const cs = ((row*31 + col*17) & 1); // simple stagger bit
-    const half = this.cellSize * 0.5;
-    const gutter = this.cellSize * 0.06; // offset from asphalt edge
-    const yBase = this.cellSize * 0.05;
-
-    const addLampAt = (lx, lz, faceDir) => {
-      const lamp = this._createStreetLightMesh();
-      lamp.position.set(lx, yBase, lz);
-      lamp.userData.kind = 'streetlight';
-      roadMesh.add(lamp);
-      // Spot-like light: use PointLight for perf
-      const intensity = 0.1;
-      const p = new THREE.PointLight(0xfff2b6, intensity, this.cellSize * 2.6, 1.6);
-      p.position.set(lx, yBase + this.cellSize*0.9, lz);
-      p.castShadow = false;
-      p.userData.kind = 'streetlight';
-      roadMesh.add(p);
-      this.streetLightPoints.push(p);
-      // Aim the lamp head along faceDir by rotating the arm
-      const dirYaw = this._yawForDir(faceDir);
-      // The arm runs along +Z from the pole; rotate pole so arm points into the road
-      lamp.rotation.y = dirYaw;
-    };
-
-    const placeStraight = (dir) => {
-      if (dir==='N' || dir==='S') {
-        // Vertical: right edge means +X in world, offset from edge and stagger along Z
-        const edgeX = half - gutter; // relative to tile center
-        const zOff = cs ? -half + gutter : half - gutter; // alternate ends
-        addLampAt(edgeX, zOff, 'W');
-      } else {
-        // Horizontal: right edge means -Z in world
-        const edgeZ = -half + gutter;
-        const xOff = cs ? half - gutter : -half + gutter;
-        addLampAt(xOff, edgeZ, 'N');
-      }
-    };
-
-    const placeCorner = (outDir) => {
-      // outDir indicates the diagonal outward from corner into sidewalk
-      const o = half - gutter;
-      let lx = 0, lz = 0, face = 'N';
-      switch(outDir){
-        case 'NE': lx = o; lz = -o; face = 'W'; break;
-        case 'NW': lx = -o; lz = -o; face = 'S'; break;
-        case 'SE': lx = o; lz = o; face = 'N'; break;
-        case 'SW': lx = -o; lz = o; face = 'E'; break;
-      }
-      addLampAt(lx, lz, face);
-    };
-
-    // Decide shape
-    const isVert = (mask & N) || (mask & S);
-    const isHorz = (mask & E) || (mask & W);
-    if ((isVert && isHorz) && !isIntersection) {
-      // L turn: determine which corner is road and place lamp on outer corner
-      if ((mask & N) && (mask & E)) placeCorner('SW');
-      else if ((mask & E) && (mask & S)) placeCorner('NW');
-      else if ((mask & S) && (mask & W)) placeCorner('NE');
-      else if ((mask & W) && (mask & N)) placeCorner('SE');
-    } else if (isVert && !isHorz) {
-      placeStraight('N');
-    } else if (!isVert && isHorz) {
-      placeStraight('E');
-    } else {
-      // isolated road tile: put a single lamp at one edge
-      const o = half - gutter;
-      const lx = o, lz = cs ? -o : o;
-      addLampAt(lx, lz, cs ? 'W' : 'N');
-    }
-  }
 
   _onKeyDown(e) {
     if (!this.ghost) return;
@@ -956,66 +821,6 @@ class City3DGame {
     }
   }
 
-  _getFacadeTexture(type) {
-    const key = `facade_${type}`; if (this.textureCache[key]) return this.textureCache[key];
-    const cols = 6, rows = 8; const w = 192, h = 256; const c = document.createElement('canvas'); c.width = w; c.height = h; const ctx = c.getContext('2d');
-    // Base wall
-    ctx.fillStyle = type==='factory' ? '#c9b6a1' : '#d4d8e5'; ctx.fillRect(0,0,w,h);
-    // Slight vertical gradient
-    const grad = ctx.createLinearGradient(0,0,0,h); grad.addColorStop(0,'rgba(0,0,0,0.08)'); grad.addColorStop(1,'rgba(0,0,0,0.18)'); ctx.fillStyle=grad; ctx.fillRect(0,0,w,h);
-    // Windows grid
-    const padX = 12, padY = 16; const winW = (w - padX*2) / cols - 6; const winH = (h - padY*2) / rows - 6;
-    for (let r=0;r<rows;r++){
-      for (let cidx=0;cidx<cols;cidx++){
-        const x = padX + cidx*(winW+6), y = padY + r*(winH+6);
-        const on = Math.random()>0.4; // ~60% lit
-        ctx.fillStyle = on ? (Math.random()>0.5?'#ffd88a':'#fff4c2') : '#1b1f2a';
-        ctx.fillRect(x,y,winW,winH);
-        // mullions
-        ctx.fillStyle = 'rgba(0,0,0,0.15)';
-        ctx.fillRect(x+winW*0.5-1,y,2,winH);
-        ctx.fillRect(x,y+winH*0.5-1,winW,2);
-      }
-    }
-    const tex = new THREE.CanvasTexture(c); tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.needsUpdate = true; this.textureCache[key] = tex; return tex;
-  }
-
-  _createStreetLightMesh() {
-    const poleH = this.cellSize * 1.25;
-    const poleR = this.cellSize * 0.015;
-    const armLen = this.cellSize * 0.2;
-
-    const poleMat = new THREE.MeshStandardMaterial({ color: 0x22252a, roughness: 0.6, metalness: 0.8 });
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(poleR, poleR, poleH, 8), poleMat);
-    pole.position.y = poleH / 2;
-    pole.castShadow = false; pole.receiveShadow = false;
-
-    // Sleek arm attached near the top of the pole
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(poleR * 0.7, poleR * 0.7, armLen, 8), poleMat);
-    arm.rotation.z = Math.PI / 2;
-    arm.position.set(0, poleH * 0.45, armLen / 2);
-    pole.add(arm);
-
-    // Simple head with anchor for bulb
-    const anchor = new THREE.Object3D();
-    anchor.name = 'lampAnchor';
-    anchor.position.set(0, 0, armLen / 2);
-    arm.add(anchor);
-
-    const bulb = new THREE.Mesh(
-      new THREE.SphereGeometry(this.cellSize * 0.035, 8, 8),
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        emissive: 0xfff0c0,
-        emissiveIntensity: this.timeOfDay === 'night' ? 2.0 : 0.1,
-        roughness: 0.1
-      })
-    );
-    bulb.position.set(0, -this.cellSize * 0.025, 0);
-    anchor.add(bulb);
-
-    return pole;
-  }
 
   _addBuilding() {
     const idx = this.buildings.length;
@@ -1065,13 +870,28 @@ class City3DGame {
   }
 
   _updateUI() {
-    if (this.coinTextEl) this.coinTextEl.textContent = `${this.coins}`;
-    if (this.popTextEl) this.popTextEl.textContent = `${this.population}`;
-    if (this.happyTextEl) this.happyTextEl.textContent = `${Math.round(this.happiness*100)}%`;
-    if (this.expandCityBtn) {
-      const canExpand = this.coins >= this.expandCost;
-      this.expandCityBtn.disabled = !canExpand;
+    if (this.levelTextEl) this.levelTextEl.textContent = `Level ${this.level}`;
+    
+    // Count filled slots for progression
+    let filled = 0;
+    for (let r=0; r<this.gridSize; r++) {
+      for (let c=0; c<this.gridSize; c++) {
+        if (this.grid[r][c]) filled++;
+      }
     }
+    const total = this.gridSize * this.gridSize;
+    if (this.progressTextEl) this.progressTextEl.textContent = `${filled}/${total}`;
+    
+    if (this.happyPointsTextEl) this.happyPointsTextEl.textContent = `${this.happinessPoints}`;
+    if (this.happyTextEl) this.happyTextEl.textContent = `${Math.round(this.happiness*100)}%`;
+
+    // Manage UI unlock groups based on level
+    const l2 = document.getElementById('lvl2Group');
+    const l3 = document.getElementById('lvl3Group');
+    const l4 = document.getElementById('lvl4Group');
+    if (l2) l2.style.display = this.level >= 2 ? 'flex' : 'none';
+    if (l3) l3.style.display = this.level >= 3 ? 'flex' : 'none';
+    if (l4) l4.style.display = this.level >= 4 ? 'flex' : 'none';
   }
 
   _estimateIncomePerSecond() {
@@ -1139,14 +959,27 @@ class City3DGame {
     this.population = pop;
     const avgH = housesCount ? (happinessSum / housesCount) : 1.0;
     this.happiness = Math.max(0.0, Math.min(1.0, avgH));
-    // Level based on simple population milestones
-    const milestones = [0, 20, 50, 100, 200, 400, 800];
-    let lvl = 1; for (let i=0;i<milestones.length;i++){ if (this.population >= milestones[i]) lvl = i+1; else break; }
-    this.level = lvl;
-    if (this.level > this._lastLevel) {
-      this._feed(`Level up! ${this.level}`);
-      this._lastLevel = this.level;
+    
+    // Level progression based on filled plots
+    let filledCount = 0;
+    for (let r=0; r<this.gridSize; r++){
+      for (let c=0; c<this.gridSize; c++){
+        if (this.grid[r][c]) filledCount++;
+      }
     }
+    
+    if (filledCount >= this.gridSize * this.gridSize && this.gridSize < 25) { // Arbitrary max grid size check
+      this.level++;
+      this.happinessPoints += 25; // Reward
+      this._lastLevel = this.level;
+      this._feed(`Level up! ${this.level}`);
+      this._toastAtCell(Math.floor(this.gridSize/2), Math.floor(this.gridSize/2), `Level Up!`);
+      // Schedule expansion
+      setTimeout(() => {
+        this._expandGridByOneRing();
+      }, 600);
+    }
+    
     this._updateUI();
   }
 
@@ -1158,8 +991,7 @@ class City3DGame {
   }
 
   _tryExpandCity() {
-    if (this.coins < this.expandCost) return;
-    this.coins -= this.expandCost;
+    // Left as legacy wrapper if ever manually invoked
     this._expandGridByOneRing();
     this._updateUI();
     this._feed(`City expanded to ${this.gridSize}×${this.gridSize}`);
@@ -1167,7 +999,7 @@ class City3DGame {
 
   _expandGridByOneRing() {
     const oldSize = this.gridSize;
-    const newSize = oldSize + 2;
+    const newSize = oldSize + 5; // Expand by 5 units (adding another grid next to it)
     const newGrid = Array.from({ length: newSize }, () => Array(newSize).fill(null));
 
     // Despawn all smoke puffs (visual-only) to avoid odd offsets
@@ -1182,15 +1014,14 @@ class City3DGame {
     // Parks to respawn people after shifting
     const parksToRespawn = [];
 
-    // Shift all placed meshes +1 row/col and reassign
+    // Keep all placed meshes at their existing row/col
     for (let r = 0; r < oldSize; r++) {
       for (let c = 0; c < oldSize; c++) {
         const mesh = this.grid[r][c];
         if (!mesh) continue;
-        const newRow = r + 1;
-        const newCol = c + 1;
-        const pos = this._gridToWorld(newCol, newRow);
-        mesh.position.set(pos.x, mesh.position.y, pos.z);
+        const newRow = r;
+        const newCol = c;
+        // World position remains exactly the same, no need to update position
         mesh.userData.grid = { row: newRow, col: newCol };
         newGrid[newRow][newCol] = mesh;
         if (mesh.userData.type === 'park') {
@@ -1209,24 +1040,8 @@ class City3DGame {
 
     // (River expansion handling removed)
 
-    // Refresh all road textures for new neighbor masks
-    for (let r = 0; r < this.gridSize; r++) {
-      for (let c = 0; c < this.gridSize; c++) {
-        if (this._isRoadCell(r, c)) {
-          const m = this.grid[r][c];
-          if (m) this._applyRoadTexture(m, r, c);
-        }
-      }
-    }
-
-
-
-    // Shift cars by +1 cell and update indices
-    for (const car of this.cars) {
-      car.row += 1; car.col += 1;
-      car.mesh.position.x += this.cellSize;
-      car.mesh.position.z += this.cellSize;
-    }
+    // No need to shift cars since the logical grid coordinates didn't shift
+    // their world positions and row/col are still accurate
 
     // Respawn people for parks at new positions
     for (const p of parksToRespawn) this._spawnPeopleForPark(p.mesh, p.row, p.col);
@@ -1272,193 +1087,7 @@ class City3DGame {
   // Apply time scaling to simulation; visuals (shaders) continue real-time
   const sdt = dt * (this.timeScale || 0);
 
-    // (River animation removed)
-    if (this._waterShader) {
-      this._waterShader.uniforms.uTime.value = t;
-    }
-    // Water animation
-    this._updateWater(t);
-
-    // Subtle emissive pulsing for life
-    for (const b of this.buildings) {
-      const pulse = 0.25 + 0.15 * Math.sin(t * 1.2 + b.position.x * 0.2 + b.position.z * 0.2);
-      b.traverse?.((child) => {
-        const materials = Array.isArray(child.material) ? child.material : (child.material ? [child.material] : []);
-        for (const mat of materials) {
-          if (mat && 'emissiveIntensity' in mat && mat.opacity > 0.01) mat.emissiveIntensity = pulse;
-        }
-      });
-    }
-
-  // Smoke update
-  for (let i=this.smokePuffs.length-1;i>=0;i--) {
-    const p = this.smokePuffs[i];
-    p.t += sdt;
-    const k = p.t / p.life;
-    p.sprite.material.opacity = Math.min(0.9, k*1.2) * (1.0 - k);
-    p.sprite.position.addScaledVector(p.drift, this.cellSize * sdt);
-    const s = (1 + k*1.6) * this.cellSize*0.7; p.sprite.scale.set(s, s, 1);
-    if (k >= 1) { this.scene.remove(p.sprite); p.sprite.material.map.dispose(); p.sprite.material.dispose(); this.smokePuffs.splice(i,1); }
-  }
-
-  // Cars: spawn and update (slower cadence)
-  this._carSpawnTimer -= sdt;
-  if (this._carSpawnTimer <= 0 && this.cars.length < this._maxCars && this._countRoadTiles() >= 2) {
-    const start = this._findRandomRoadStart();
-    if (start) this._spawnCar(start.row, start.col, start.dir);
-    this._carSpawnTimer = 3.0 + Math.random()*2.5;
-  }
-  this._updateCars(sdt);
-
-  // People wander in parks
-  this._updatePeople(sdt);
-
-  this.controls.update();
-    // Drive world-space water shader
-    if (this._waterWorldUniforms) {
-      this._waterWorldUniforms.uTime.value = t;
-    }
-    if (this._realWaterUniforms) {
-      this._realWaterUniforms.uTime.value = t;
-    }
-    if (this._waterTexSide) {
-      this._waterTexSide.offset.x = (this._waterTexSide.offset.x + dt * 0.03) % 1;
-      this._waterTexSide.needsUpdate = true;
-    }
     this.renderer.render(this.scene, this.camera);
-  }
-
-  _isWaterCell(row, col) {
-    if (row < 0 || col < 0 || row >= this.gridSize || col >= this.gridSize) return false;
-    const m = this.grid[row][col];
-    return !!(m && m.userData && m.userData.type === 'water');
-  }
-
-  _computeWaterMask(row, col) {
-    const N=1,E=2,S=4,W=8; let mask=0;
-    if (this._isWaterCell(row-1, col)) mask |= N;
-    if (this._isWaterCell(row, col+1)) mask |= E;
-    if (this._isWaterCell(row+1, col)) mask |= S;
-    if (this._isWaterCell(row, col-1)) mask |= W;
-    return mask;
-  }
-
-  _getWaterTexture(mask=0) {
-    if (!this.textureCache.water) this.textureCache.water = {};
-    if (this.textureCache.water[mask]) return this.textureCache.water[mask];
-    const size = 32;
-    const c = document.createElement('canvas'); c.width = c.height = size;
-    const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;
-    const dark = '#1b3c73', mid='#215b9a', light='#2fa4e7';
-    // Base pattern
-    for (let y=0;y<size;y++){
-      for (let x=0;x<size;x++){
-        const v = ((x + y) % 8);
-        const col = v<2 ? light : v<5 ? mid : dark;
-        ctx.fillStyle = col; ctx.fillRect(x, y, 1, 1);
-      }
-    }
-    // Edges if neighbor missing: draw darker 2px border to suggest continuity across tiles
-    ctx.fillStyle = '#102945';
-    const bw = 2;
-    const N=1,E=2,S=4,W=8;
-    if (!(mask & N)) ctx.fillRect(0, 0, size, bw);
-    if (!(mask & S)) ctx.fillRect(0, size-bw, size, bw);
-    if (!(mask & W)) ctx.fillRect(0, 0, bw, size);
-    if (!(mask & E)) ctx.fillRect(size-bw, 0, bw, size);
-    // Rounded corners (simple pixels) when both adjacent edges are missing
-    ctx.fillStyle = '#0b1f39';
-    if (!(mask & N) && !(mask & W)) ctx.fillRect(0,0,3,3);
-    if (!(mask & N) && !(mask & E)) ctx.fillRect(size-3,0,3,3);
-    if (!(mask & S) && !(mask & W)) ctx.fillRect(0,size-3,3,3);
-    if (!(mask & S) && !(mask & E)) ctx.fillRect(size-3,size-3,3,3);
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
-    tex.repeat.set(1,1);
-    tex.needsUpdate = true;
-    this.textureCache.water[mask] = tex;
-    return tex;
-  }
-
-  _applyWaterTexture(mesh, row, col) {
-    const mask = this._computeWaterMask(row, col);
-    const tex = this._getWaterTexture(mask);
-    if (Array.isArray(mesh.material)) {
-      const top = mesh.material[2];
-      // Only apply to non-shader materials (Minecraft pixel variant)
-      if (top && top.isMeshStandardMaterial) { top.map = tex; top.needsUpdate = true; }
-    }
-  }
-
-  _refreshWaterAtAndNeighbors(row, col) {
-    const list = [ {r:row,c:col}, {r:row-1,c:col}, {r:row+1,c:col}, {r:row,c:col-1}, {r:row,c:col+1} ];
-    for (const it of list) {
-      if (!this._isWaterCell(it.r, it.c)) continue;
-      const m = this.grid[it.r][it.c];
-      if (m) this._applyWaterTexture(m, it.r, it.c);
-    }
-  }
-
-  _placeWaterTile(row, col) {
-    if (row < 0 || col < 0 || row >= this.gridSize || col >= this.gridSize) return;
-    if (this.grid[row][col]) return; // don't overwrite
-    const m = this._createBuildingMesh('water');
-    const pos = this._gridToWorld(col, row);
-    m.position.set(pos.x, m.position.y, pos.z);
-    m.userData = { type: 'water', grid: { col, row } };
-    this.scene.add(m);
-    this.buildings.push(m);
-    this.grid[row][col] = m;
-  }
-
-  _refreshAllWater() {
-    for (let r = 0; r < this.gridSize; r++) {
-      for (let c = 0; c < this.gridSize; c++) {
-        if (this._isWaterCell(r, c)) {
-          this._refreshWaterAtAndNeighbors(r, c);
-        }
-      }
-    }
-  }
-
-  _generateDefaultPonds() {
-    const size = this.gridSize;
-    if (size < 3) return;
-
-    const pondCells = new Set();
-    const addCircle = (cr, cc, rad) => {
-      for (let r = 0; r < size; r++) {
-        for (let c = 0; c < size; c++) {
-          const distSq = (r - cr) * (r - cr) + (c - cc) * (c - cc);
-          if (distSq <= rad * rad) {
-            pondCells.add(`${r},${c}`);
-          }
-        }
-      }
-    };
-
-    // Corner Pond 1 (Mixed circular shape - 2 overlapping circles)
-    const r1 = size - 2;
-    const c1 = size - 2;
-    const r2 = size - 1;
-    const c2 = size - 1;
-    addCircle(r1, c1, 1.0);
-    addCircle(r2, c2, 1.0);
-
-    // Corner Pond 2 (Smaller pond - 1 circle)
-    const r3 = 0;
-    const c3 = 1;
-    const rad3 = size >= 6 ? 1.0 : 0.8; // only 1 tile if grid is small
-    addCircle(r3, c3, rad3);
-
-    for (const cellStr of pondCells) {
-      const [r, c] = cellStr.split(',').map(Number);
-      this._placeWaterTile(r, c);
-    }
-
-    this._refreshAllWater();
   }
 
   _countRoadTiles() {
@@ -1637,71 +1266,6 @@ class City3DGame {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
   }
-  // (River helper functions removed)
-
-  // Water: toggleable decorative band with flowing shader
-  _toggleWater() {
-    if (this.water.enabled) {
-      this._destroyWater();
-      this.water.enabled = false;
-      if (this.toggleWaterBtn) this.toggleWaterBtn.textContent = 'Toggle Water';
-      this._feed('Water: Off');
-    } else {
-      this._createWater();
-      this.water.enabled = true;
-      if (this.toggleWaterBtn) this.toggleWaterBtn.textContent = 'Water: On';
-      this._feed('Water: On');
-    }
-  }
-
-  _createWater() {
-    const planeSize = this.gridSize * this.cellSize;
-    const half = planeSize / 2;
-    const riverWidth = Math.max(10, planeSize * 0.38);
-    const riverLength = planeSize + 30;
-    const geo = new THREE.PlaneGeometry(riverLength, riverWidth, 1, 1);
-    geo.rotateX(-Math.PI / 2);
-    const uniforms = {
-      uTime: { value: 0 },
-      uDeepColor: { value: new THREE.Color(0x0a2740) },
-      uShallowColor: { value: new THREE.Color(0x2aa6b8) },
-      uSpecularColor: { value: new THREE.Color(0xffffff) },
-      uLightDir: { value: new THREE.Vector3(0.3, 0.9, 0.2).normalize() },
-      uFlowDir: { value: new THREE.Vector2(1.0, 0.15).normalize() },
-    };
-    const vert = `uniform float uTime; varying vec3 vWorldPos; varying vec2 vXZ; float waveHeight(vec2 p, float t){ float h=0.0; h += 0.22 * sin(dot(p, vec2(1.2, 0.6)) * 0.35 + t * 0.8); h += 0.12 * sin(dot(p, vec2(-0.7, 1.1)) * 0.6 + t * 1.3); h += 0.05 * sin(dot(p, vec2(0.2, -1.7)) * 1.2 + t * 1.9); return h; } void main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vWorldPos = wp.xyz; vXZ = wp.xz; float h = waveHeight(vXZ, uTime); wp.y += h; gl_Position = projectionMatrix * viewMatrix * wp; }`;
-    const frag = `precision highp float; uniform float uTime; uniform vec3 uDeepColor; uniform vec3 uShallowColor; uniform vec3 uSpecularColor; uniform vec3 uLightDir; uniform vec2 uFlowDir; varying vec3 vWorldPos; varying vec2 vXZ; float waveHeight(vec2 p, float t){ float h=0.0; h += 0.22 * sin(dot(p, vec2(1.2, 0.6)) * 0.35 + t * 0.8); h += 0.12 * sin(dot(p, vec2(-0.7, 1.1)) * 0.6 + t * 1.3); h += 0.05 * sin(dot(p, vec2(0.2, -1.7)) * 1.2 + t * 1.9); return h; } vec3 computeNormal(vec2 p, float t){ float e = 0.4; float h = waveHeight(p, t); float hx = waveHeight(p + vec2(e, 0.0), t); float hz = waveHeight(p + vec2(0.0, e), t); vec3 dx = vec3(e, hx - h, 0.0); vec3 dz = vec3(0.0, hz - h, e); return normalize(cross(dz, dx)); } void main(){ vec3 N = computeNormal(vXZ, uTime); vec3 V = normalize(cameraPosition - vWorldPos); vec3 L = normalize(uLightDir); float NoV = clamp(dot(N, V), 0.0, 1.0); float F = pow(1.0 - NoV, 5.0); vec3 base = mix(uDeepColor, uShallowColor, clamp(F*0.85 + 0.15, 0.0, 1.0)); float flow = sin(dot(vXZ, uFlowDir * 0.25) + uTime * 1.4) * 0.5 + 0.5; flow *= sin(dot(vXZ, vec2(-uFlowDir.y, uFlowDir.x) * 0.18) + uTime * 0.9) * 0.5 + 0.5; float streaks = smoothstep(0.75, 0.98, flow); base += 0.08 * streaks; vec3 H = normalize(L + V); float spec = pow(max(dot(N, H), 0.0), 90.0) * 0.8; vec3 color = base + uSpecularColor * spec * (0.35 + 0.65*F); gl_FragColor = vec4(color, 0.92); }`;
-    const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag, transparent: true, depthWrite: false });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(half, 0.02, half - planeSize * 0.55);
-    mesh.receiveShadow = false;
-    mesh.castShadow = false;
-    this.scene.add(mesh);
-    this.water.mesh = mesh;
-    this.water.material = mat;
-    this.water.uniforms = uniforms;
-  }
-
-  _destroyWater() {
-    if (!this.water.mesh) return;
-    this.scene.remove(this.water.mesh);
-    this.water.mesh.geometry.dispose();
-    this.water.material.dispose();
-    this.water.mesh = null;
-    this.water.material = null;
-    this.water.uniforms = null;
-  }
-
-  _rebuildWaterGeometry() {
-    if (!this.water.enabled) return;
-    this._destroyWater();
-    this._createWater();
-  }
-
-  _updateWater(t) {
-    if (!this.water || !this.water.uniforms) return;
-    this.water.uniforms.uTime.value = t;
-  }
 
   // --- Dashboard helpers ---
   setTimeScale(scale) {
@@ -1739,5 +1303,4 @@ class City3DGame {
 
 }
 
-// Hook up to window for easy access from HTML
-window.City3DGame = City3DGame;
+export { City3DGame };
