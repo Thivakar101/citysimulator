@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>City Sim Park</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; overflow: hidden; }
+  canvas { display: block; }
+  #hud {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.5); backdrop-filter: blur(8px);
+    color: #aef; padding: 6px 18px; border-radius: 20px;
+    font: 11px/1.4 monospace; letter-spacing: 0.06em; pointer-events: none;
+    border: 1px solid rgba(100,180,255,0.2);
+  }
+</style>
+</head>
+<body>
+<div id="hud">🏙️ CITY SIM PARK · drag to orbit · scroll to zoom</div>
+<script type="importmap">
+{ "imports": { "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ── Renderer ──────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+// ── Scene ─────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+// ── Camera (isometric-ish, high angle) ────────────────────────
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 100);
+let theta = 0.6, phi = 0.72, radius = 14;
+const target = new THREE.Vector3(0, 0, 0);
+
+function updateCam() {
+  camera.position.set(
+    target.x + radius * Math.sin(phi) * Math.sin(theta),
+    target.y + radius * Math.cos(phi),
+    target.z + radius * Math.sin(phi) * Math.cos(theta)
+  );
+  camera.lookAt(target);
+}
+updateCam();
+
+let dragging = false, last = { x: 0, y: 0 };
+renderer.domElement.addEventListener('mousedown', e => { dragging = true; last = { x: e.clientX, y: e.clientY }; });
+window.addEventListener('mouseup', () => dragging = false);
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  theta -= (e.clientX - last.x) * 0.006;
+  phi = Math.max(0.2, Math.min(1.3, phi + (e.clientY - last.y) * 0.006));
+  last = { x: e.clientX, y: e.clientY };
+  updateCam();
+});
+renderer.domElement.addEventListener('wheel', e => {
+  radius = Math.max(4, Math.min(30, radius + e.deltaY * 0.02));
+  updateCam();
+}, { passive: true });
+
+// ── Lights ────────────────────────────────────────────────────
+const sun = new THREE.DirectionalLight(0xfff8e7, 1.6);
+sun.position.set(6, 12, 8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = sun.shadow.camera.bottom = -8;
+sun.shadow.camera.right = sun.shadow.camera.top = 8;
+sun.shadow.camera.near = 0.1; sun.shadow.camera.far = 40;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0xc8dff8, 0.55));
+scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8f3c, 0.35));
+
+// ── Helpers ───────────────────────────────────────────────────
+const M = (geo, color, rough) => {
+  const mat = new THREE.MeshLambertMaterial({ color });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+};
+const box  = (w, h, d, c) => M(new THREE.BoxGeometry(w, h, d), c);
+const cyl  = (rt, rb, h, s, c) => M(new THREE.CylinderGeometry(rt, rb, h, s), c);
+const sph  = (r, c, seg = 8)   => M(new THREE.SphereGeometry(r, seg, seg), c);
+
+function place(mesh, x, y, z, parent = scene) {
+  mesh.position.set(x, y, z);
+  parent.add(mesh);
+  return mesh;
+}
+
+// ═══════════════════════════════════════════════
+//  PARK BASE  (one city block: 6×6 units)
+// ═══════════════════════════════════════════════
+const PARK = 6; // half-size
+
+// Ground tile
+const ground = box(PARK*2, 0.08, PARK*2, 0x5aaa44);
+place(ground, 0, 0, 0);
+
+// Sidewalk border
+
+
+// Grass patches (darker)
+for (let i = 0; i < 18; i++) {
+  const p = new THREE.Mesh(
+    new THREE.CircleGeometry(0.3 + Math.random() * 0.5, 7),
+    new THREE.MeshLambertMaterial({ color: 0x4a9a38 })
+  );
+  p.rotation.x = -Math.PI / 2;
+  p.position.set((Math.random() - 0.5) * 10, 0.042, (Math.random() - 0.5) * 10);
+  scene.add(p);
+}
+
+// ═══════════════════════════════════════════════
+//  PATHS
+// ═══════════════════════════════════════════════
+const pathMat = new THREE.MeshLambertMaterial({ color: 0xd4c5a9 });
+// Cross paths
+[[12, 0.3, 0, 0], [0.3, 0, 12, Math.PI/2]].forEach(([w, _, d, r]) => {
+  const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d < 12 ? 0.7 : 0.7), pathMat);
+  p.rotation.x = -Math.PI / 2;
+  p.position.y = 0.042;
+  if (r) p.rotation.z = r;
+  scene.add(p);
+});
+
+const pathH = new THREE.Mesh(new THREE.PlaneGeometry(12, 0.7), pathMat);
+pathH.rotation.x = -Math.PI/2; pathH.position.y = 0.042; scene.add(pathH);
+const pathV = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 12), pathMat);
+pathV.rotation.x = -Math.PI/2; pathV.position.y = 0.042; scene.add(pathV);
+
+// Round plaza center
+const plaza = new THREE.Mesh(new THREE.CircleGeometry(1.2, 24), pathMat);
+plaza.rotation.x = -Math.PI/2; plaza.position.y = 0.043; scene.add(plaza);
+
+// ═══════════════════════════════════════════════
+//  FOUNTAIN  (tiny, cute)
+// ═══════════════════════════════════════════════
+
+const fWater = new THREE.Mesh(new THREE.CircleGeometry(0.72, 32),
+  new THREE.MeshLambertMaterial({ color: 0x29b6f6, transparent: true, opacity: 0.85 }));
+fWater.rotation.x = -Math.PI/2; fWater.position.set(0, 0.22, 0); scene.add(fWater);
+
+// Spray particles (small)
+const spray = [], spGeo = new THREE.SphereGeometry(0.018, 4, 4);
+const spMat = new THREE.MeshLambertMaterial({ color: 0x90caf9, transparent: true, opacity: 0.75 });
+for (let i = 0; i < 22; i++) {
+  const p = new THREE.Mesh(spGeo, spMat.clone());
+  const a = Math.random() * Math.PI * 2;
+  p.userData = { a, vx: Math.cos(a)*0.012, vz: Math.sin(a)*0.012, vy: 0.018+Math.random()*0.012, ox:0, oz:0, life: Math.random(), sp: 0.02+Math.random()*0.02 };
+  p.position.set(0, 0.9, 0);
+  scene.add(p);
+  spray.push(p);
+}
+
+// ═══════════════════════════════════════════════
+//  TREES  (chunky city-sim style)
+// ═══════════════════════════════════════════════
+function tree(x, z, s = 1) {
+  const trunk = cyl(0.06*s, 0.09*s, 0.55*s, 6, 0x6d4c41);
+  trunk.position.set(x, 0.32*s, z); scene.add(trunk);
+  const treeColors = [0x2e7d32, 0x388e3c, 0x33691e];
+  const c = treeColors[Math.floor(Math.random()*treeColors.length)];
+  // Chunky ball-of-leaves (2 spheres stacked for mini-tree feel)
+  const b1 = sph(0.32*s, c);
+  b1.position.set(x, 0.75*s, z); scene.add(b1);
+  const b2 = sph(0.22*s, c);
+  b2.position.set(x + (Math.random()-.5)*0.15*s, 1.0*s, z + (Math.random()-.5)*0.15*s); scene.add(b2);
+}
+
+// 4 corner trees + ring around fountain + edge trees
+tree(-3.5, -3.5, 1.1); tree(3.5, -3.5, 1.0); tree(-3.5, 3.5, 1.2); tree(3.5, 3.5, 0.9);
+tree(-4.8,  0,   0.9); tree( 4.8,  0,  1.0); tree(0, -4.8, 1.1); tree(0,  4.8, 0.95);
+tree(-2.5, -4.5, 0.8); tree(2.5, -4.5, 0.85); tree(-2.5, 4.5, 0.8); tree(2.5, 4.5, 0.9);
+// Fountain ring trees (tiny)
+[0,1,2,3].forEach(i => {
+  const a = (i/4)*Math.PI*2 + Math.PI/4;
+  tree(Math.cos(a)*2.2, Math.sin(a)*2.2, 0.65);
+});
+
+// ═══════════════════════════════════════════════
+//  BENCHES  (teeny)
+// ═══════════════════════════════════════════════
+function bench(x, z, ry = 0) {
+  const g = new THREE.Group();
+  const seat = box(0.7, 0.04, 0.22, 0x8d6e63); seat.position.y = 0.2; g.add(seat);
+  const back = box(0.7, 0.18, 0.04, 0x795548); back.position.set(0, 0.3, -0.1); g.add(back);
+  [-0.28, 0.28].forEach(ox => {
+    const leg = box(0.04, 0.2, 0.22, 0x6d4c41); leg.position.set(ox, 0.1, 0); g.add(leg);
+  });
+  g.position.set(x, 0.04, z); g.rotation.y = ry; scene.add(g);
+}
+
+bench(-1.5,  0.6,  0);
+bench( 1.5, -0.6,  Math.PI);
+bench( 0.6, -1.5,  Math.PI/2);
+bench(-0.6,  1.5, -Math.PI/2);
+bench(-3.5,  0.5,  0);
+bench( 3.5, -0.5,  Math.PI);
+bench( 0.5, -3.5,  Math.PI/2);
+bench(-0.5,  3.5, -Math.PI/2);
+
+// ═══════════════════════════════════════════════
+//  LAMP POSTS  (pixel-art chunky)
+// ═══════════════════════════════════════════════
+function lamp(x, z) {
+  const post = cyl(0.03, 0.04, 1.1, 6, 0x37474f);
+  post.position.set(x, 0.6, z); scene.add(post);
+  const globe = sph(0.07, 0xfffde7, 6);
+  globe.position.set(x, 1.18, z); scene.add(globe);
+  const light = new THREE.PointLight(0xfffde7, 0.6, 3.5);
+  light.position.set(x, 1.18, z); scene.add(light);
+}
+
+lamp(-1.2, -1.2); lamp(1.2, -1.2); lamp(-1.2, 1.2); lamp(1.2, 1.2);
+lamp(-3.8, -3.8); lamp(3.8, -3.8); lamp(-3.8, 3.8); lamp(3.8, 3.8);
+
+// ═══════════════════════════════════════════════
+//  FLOWERS  (tiny dots)
+// ═══════════════════════════════════════════════
+const fCols = [0xf06292, 0xffb74d, 0xce93d8, 0xff8a65, 0xfff176, 0xef9a9a];
+function flower(x, z) {
+  const stem = cyl(0.012, 0.012, 0.14, 4, 0x66bb6a);
+  stem.position.set(x, 0.11, z); scene.add(stem);
+  const head = sph(0.055, fCols[Math.floor(Math.random()*fCols.length)], 5);
+  head.position.set(x, 0.2, z); scene.add(head);
+}
+
+// Flower rings around fountain
+for (let i = 0; i < 28; i++) {
+  const a = (i/28)*Math.PI*2;
+  const r = 1.4 + Math.random()*0.18;
+  flower(Math.cos(a)*r, Math.sin(a)*r);
+}
+// Corner flower clusters
+[[-4,-4],[4,-4],[-4,4],[4,4]].forEach(([cx,cz]) => {
+  for (let i=0;i<7;i++) flower(cx+(Math.random()-.5)*0.9, cz+(Math.random()-.5)*0.9);
+});
+
+// ═══════════════════════════════════════════════
+//  TINY PEOPLE  (city-sim voxel-ish style)
+// ═══════════════════════════════════════════════
+const SKIN  = [0xffcc99, 0xc68642, 0xf1c27d, 0x8d5524, 0xffe0bd];
+const SHIRT = [0xef5350,0x42a5f5,0xffca28,0x66bb6a,0xab47bc,0xff7043,0x26c6da,0xec407a];
+const PANTS = [0x1565c0,0x37474f,0x4e342e,0x1b5e20,0x263238];
+
+function person(pathDef) {
+  const g = new THREE.Group();
+  const sc = 0.052; // tiny!
+  const sk = SKIN [Math.floor(Math.random()*SKIN.length)];
+  const sh = SHIRT[Math.floor(Math.random()*SHIRT.length)];
+  const pa = PANTS[Math.floor(Math.random()*PANTS.length)];
+
+  // Legs (2 boxes)
+  [-1,1].forEach((s,i) => {
+    const leg = box(sc*1.8, sc*4, sc*1.8, pa);
+    leg.position.set(s*sc*1.0, sc*2.2, 0); leg.name=`l${i}`; g.add(leg);
+  });
+  // Body
+  const body = box(sc*4, sc*4.5, sc*2.2, sh);
+  body.position.y = sc*6.8; g.add(body);
+  // Head
+  const head = box(sc*3.2, sc*3.2, sc*3.2, sk);
+  head.position.y = sc*10.5; g.add(head);
+  // Arms
+  [-1,1].forEach((s,i) => {
+    const arm = box(sc*1.6, sc*3.8, sc*1.6, sh);
+    arm.position.set(s*sc*3.2, sc*6.5, 0); arm.name=`a${i}`; g.add(arm);
+  });
+
+  g.userData = { path: pathDef, ph: Math.random()*Math.PI*2 };
+  g.castShadow = true;
+  scene.add(g);
+  return g;
+}
+
+// Path definitions (tight, park-scale)
+const paths = [
+  // Oval laps around fountain
+  { type:'oval', cx:0, cz:0, rx:1.8, rz:1.8, sp:0.8+Math.random()*0.6, ph:Math.random()*Math.PI*2 },
+  { type:'oval', cx:0, cz:0, rx:2.4, rz:2.2, sp:0.55+Math.random()*0.4, ph:Math.random()*Math.PI*2 },
+  { type:'oval', cx:0, cz:0, rx:2.0, rz:2.0, sp:0.7+Math.random()*0.5, ph:Math.random()*Math.PI*2 },
+  // Along horizontal path
+  { type:'line', x1:-5.5, z1:0.0, x2:5.5, z2:0.0, sp:0.025+Math.random()*0.02, t:Math.random() },
+  { type:'line', x1:-5.5, z1:0.1, x2:5.5, z2:0.1, sp:0.02+Math.random()*0.02, t:Math.random() },
+  { type:'line', x1:5.5,  z1:-0.1, x2:-5.5, z2:-0.1, sp:0.022+Math.random()*0.018, t:Math.random() },
+  // Along vertical path
+  { type:'line', x1:0.0, z1:-5.5, x2:0.0, z2:5.5, sp:0.022+Math.random()*0.02, t:Math.random() },
+  { type:'line', x1:0.1, z1:5.5, x2:0.1, z2:-5.5, sp:0.02+Math.random()*0.02, t:Math.random() },
+  // Wandering diagonals
+  { type:'oval', cx:-2.5, cz:-2.5, rx:1.2, rz:1.0, sp:0.6, ph:Math.random()*Math.PI*2 },
+  { type:'oval', cx:2.5,  cz:2.5,  rx:1.1, rz:1.1, sp:0.65, ph:Math.random()*Math.PI*2 },
+  { type:'oval', cx:-2.5, cz:2.5,  rx:1.0, rz:1.2, sp:0.55, ph:Math.random()*Math.PI*2 },
+  { type:'oval', cx:2.5,  cz:-2.5, rx:1.2, rz:1.0, sp:0.7,  ph:Math.random()*Math.PI*2 },
+];
+
+const people = paths.map(p => person(p));
+
+// ═══════════════════════════════════════════════
+//  CLOUDS  (fluffy, high above)
+// ═══════════════════════════════════════════════
+const cMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+function cloud(x, y, z, s=1) {
+  const g = new THREE.Group();
+  [[0,0,0,0.7],[0.6,0.2,0,0.5],[-0.6,0.15,0,0.45],[0.2,-0.1,0.3,0.4]].forEach(([cx,cy,cz,r]) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r*s,7,7), cMat);
+    m.position.set(cx*s,cy*s,cz*s); g.add(m);
+  });
+  g.position.set(x,y,z);
+  g.userData.sp = 0.003+Math.random()*0.004;
+  scene.add(g);
+  return g;
+}
+const clouds = [
+   cloud(4, 8, -6, 0.7), cloud(-3, 9, 5, 1.0),
+  cloud(7, 7.5, 2, 0.8), cloud(0, 8.5, -8, 0.65),
+];
+
+// ═══════════════════════════════════════════════
+//  BIRDS  (tiny, 4)
+// ═══════════════════════════════════════════════
+const bMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+function bird(x,y,z) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.06,5,5), bMat); g.add(body);
+  [-1,1].forEach(s => {
+    const w = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.015,0.07), bMat);
+    w.position.set(s*0.13,0,0); w.name=`w${s}`; g.add(w);
+  });
+  g.position.set(x,y,z);
+  g.userData = { ph:Math.random()*Math.PI*2, rx:4+Math.random()*3, rz:3+Math.random()*2, sp:0.012+Math.random()*0.01, by:y };
+  scene.add(g); return g;
+}
+const birds = [bird(-4,5,-3), bird(3,6,2), bird(-2,5.5,4), bird(5,5,-2)];
+
+// ═══════════════════════════════════════════════
+//  ANIMATION
+// ═══════════════════════════════════════════════
+const clock = new THREE.Clock();
+
+function animPeople(t) {
+  people.forEach(p => {
+    const pd = p.userData.path;
+    let px, pz, nx, nz;
+    if (pd.type === 'oval') {
+      const a = t*pd.sp + pd.ph;
+      px = pd.cx + Math.cos(a)*pd.rx; pz = pd.cz + Math.sin(a)*pd.rz;
+      nx = pd.cx + Math.cos(a+0.01)*pd.rx; nz = pd.cz + Math.sin(a+0.01)*pd.rz;
+    } else {
+      pd.t = (pd.t + pd.sp*0.01) % 1;
+      const nt = (pd.t+0.01)%1;
+      px = pd.x1+(pd.x2-pd.x1)*pd.t; pz = pd.z1+(pd.z2-pd.z1)*pd.t;
+      nx = pd.x1+(pd.x2-pd.x1)*nt; nz = pd.z1+(pd.z2-pd.z1)*nt;
+    }
+    const bob = Math.abs(Math.sin(t*6+p.userData.ph))*0.008;
+    p.position.set(px, bob, pz);
+    const dx=nx-px, dz=nz-pz;
+    if(Math.abs(dx)+Math.abs(dz)>0.00001) p.rotation.y = Math.atan2(dx,dz);
+    const sw = Math.sin(t*6+p.userData.ph)*0.28;
+    p.children.forEach(c => {
+      if(c.name==='l0') c.rotation.x=sw;
+      if(c.name==='l1') c.rotation.x=-sw;
+      if(c.name==='a0') c.rotation.x=-sw*0.5;
+      if(c.name==='a1') c.rotation.x=sw*0.5;
+    });
+  });
+}
+
+function animFountain(t) {
+  spray.forEach(s => {
+    s.userData.life += s.userData.sp;
+    if(s.userData.life >= 1) {
+      s.userData.life = 0;
+      const a = Math.random()*Math.PI*2;
+      s.userData.vx=Math.cos(a)*0.012; s.userData.vz=Math.sin(a)*0.012;
+      s.userData.vy=0.018+Math.random()*0.012; s.userData.ox=0; s.userData.oz=0;
+    }
+    s.userData.ox += s.userData.vx; s.userData.oz += s.userData.vz;
+    s.userData.vy -= 0.001;
+    const h = 0.9 + s.userData.vy*s.userData.life*14 - 0.005*s.userData.life*s.userData.life*200;
+    s.position.set(s.userData.ox, Math.max(0.24, h), s.userData.oz);
+    s.material.opacity = 0.8*(1-s.userData.life*0.8);
+  });
+  fWater.material.color.setHSL(0.55, 0.9, 0.44+Math.sin(t*3)*0.05);
+}
+
+function animClouds() {
+  clouds.forEach(c => { c.position.x += c.userData.sp; if(c.position.x>14) c.position.x=-14; });
+}
+
+function animBirds(t) {
+  birds.forEach(b => {
+    b.userData.ph += b.userData.sp;
+    b.position.x = Math.cos(b.userData.ph)*b.userData.rx;
+    b.position.z = Math.sin(b.userData.ph)*b.userData.rz;
+    b.position.y = b.userData.by + Math.sin(b.userData.ph*4)*0.3;
+    b.rotation.y = -b.userData.ph+Math.PI/2;
+    b.children.forEach(c => {
+      if(c.name==='w1')  c.rotation.z = Math.sin(t*10)*0.35;
+      if(c.name==='w-1') c.rotation.z =-Math.sin(t*10)*0.35;
+    });
+  });
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  animPeople(t);
+  animFountain(t);
+  animClouds();
+  animBirds(t);
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>

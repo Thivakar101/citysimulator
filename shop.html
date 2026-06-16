@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Small Shop</title>
+<style>
+body{
+    margin:0;
+    overflow:hidden;
+    background:#8fd8ff;
+}
+</style>
+</head>
+<body>
+
+<script type="module">
+
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fd8ff);
+
+const camera = new THREE.PerspectiveCamera(
+45,
+window.innerWidth/window.innerHeight,
+0.1,
+1000
+);
+
+camera.position.set(12,10,12);
+camera.lookAt(0,3,0);
+
+const renderer = new THREE.WebGLRenderer({
+    antialias:true
+});
+
+renderer.setSize(
+    window.innerWidth,
+    window.innerHeight
+);
+
+document.body.appendChild(renderer.domElement);
+
+scene.add(
+    new THREE.AmbientLight(
+        0xffffff,
+        2
+    )
+);
+
+const sun = new THREE.DirectionalLight(
+    0xffffff,
+    2
+);
+
+sun.position.set(20,30,20);
+scene.add(sun);
+
+/* BASE */
+
+const platform = new THREE.Mesh(
+    new THREE.BoxGeometry(
+        14,
+        1,
+        14
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0xf4f4f4
+    })
+);
+
+platform.position.y = 0.5;
+scene.add(platform);
+
+/* BUILDING */
+
+const shop = new THREE.Mesh(
+    new THREE.BoxGeometry(
+        7,
+        4,
+        6
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0xffefc2
+    })
+);
+
+shop.position.y = 3;
+scene.add(shop);
+
+/* CURVED ROOF */
+
+const roof = new THREE.Mesh(
+    new THREE.CylinderGeometry(
+        3.2,
+        3.2,
+        7.5,
+        32,
+        1,
+        false,
+        0,
+        Math.PI
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0x4f7cff
+    })
+);
+
+roof.rotation.z = Math.PI/2;
+roof.position.y = 5.2;
+scene.add(roof);
+
+/* STORE BOARD */
+
+const board = new THREE.Mesh(
+    new THREE.BoxGeometry(
+        5,
+        1.4,
+        0.3
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0xff5a5a
+    })
+);
+
+board.position.set(
+    0,
+    5.8,
+    3.2
+);
+
+scene.add(board);
+
+/* NEON BORDER */
+
+const frame = new THREE.Mesh(
+    new THREE.BoxGeometry(
+        5.3,
+        1.7,
+        0.1
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0xffffff,
+        emissive:0xffffff,
+        emissiveIntensity:1
+    })
+);
+
+frame.position.set(
+    0,
+    5.8,
+    3.05
+);
+
+scene.add(frame);
+
+/* SHOPPING BAG ICON */
+
+const bag = new THREE.Mesh(
+    new THREE.BoxGeometry(
+        1.2,
+        1.2,
+        0.2
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0xffffff
+    })
+);
+
+bag.position.set(
+    0,
+    7.2,
+    0
+);
+
+scene.add(bag);
+
+const handle = new THREE.Mesh(
+    new THREE.TorusGeometry(
+        0.35,
+        0.06,
+        8,
+        20,
+        Math.PI
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0xffd84d
+    })
+);
+
+handle.rotation.z = Math.PI;
+handle.position.set(
+    0,
+    7.75,
+    0
+);
+
+scene.add(handle);
+
+/* AWNING */
+
+for(let i=0;i<6;i++){
+
+    const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(
+            1,
+            0.4,
+            1.5
+        ),
+        new THREE.MeshStandardMaterial({
+            color:
+            i%2===0
+            ?0xff5a5a
+            :0xffd84d
+        })
+    );
+
+    stripe.position.set(
+        -2.5+i,
+        3.2,
+        3.8
+    );
+
+    scene.add(stripe);
+}
+
+/* WINDOWS */
+
+const leftWindow = new THREE.Mesh(
+    new THREE.BoxGeometry(
+        2,
+        2,
+        0.1
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0xa9ecff,
+        emissive:0x224466
+    })
+);
+
+leftWindow.position.set(
+    -2,
+    3,
+    3.05
+);
+
+scene.add(leftWindow);
+
+const rightWindow = leftWindow.clone();
+rightWindow.position.x = 2;
+scene.add(rightWindow);
+
+/* DOOR */
+
+const door = new THREE.Mesh(
+    new THREE.BoxGeometry(
+        1.2,
+        2.4,
+        0.15
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0x6d4c41
+    })
+);
+
+door.position.set(
+    0,
+    2.4,
+    3.08
+);
+
+scene.add(door);
+
+/* FLOWER POTS */
+
+function flowerPot(x){
+
+    const pot = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+            0.25,
+            0.35,
+            0.5,
+            10
+        ),
+        new THREE.MeshStandardMaterial({
+            color:0xc57c3b
+        })
+    );
+
+    pot.position.set(
+        x,
+        1.3,
+        3.8
+    );
+
+    scene.add(pot);
+
+    const flower = new THREE.Mesh(
+        new THREE.SphereGeometry(
+            0.35,
+            12,
+            12
+        ),
+        new THREE.MeshStandardMaterial({
+            color:0xff4da6
+        })
+    );
+
+    flower.position.set(
+        x,
+        1.8,
+        3.8
+    );
+
+    scene.add(flower);
+}
+
+flowerPot(-3);
+flowerPot(3);
+
+/* NEON BULBS */
+
+const bulbs = [];
+
+for(let i=0;i<12;i++){
+
+    const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(
+            0.08,
+            8,
+            8
+        ),
+        new THREE.MeshStandardMaterial({
+            emissive:0xffffff,
+            emissiveIntensity:5
+        })
+    );
+
+    bulb.position.set(
+        -2.5 + i*0.45,
+        5.8,
+        3.25
+    );
+
+    scene.add(bulb);
+    bulbs.push(bulb);
+}
+
+/* TREE */
+
+function tree(x,z){
+
+    const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+            0.1,
+            0.1,
+            1,
+            8
+        ),
+        new THREE.MeshStandardMaterial({
+            color:0x8b5a2b
+        })
+    );
+
+    trunk.position.set(
+        x,
+        1.5,
+        z
+    );
+
+    scene.add(trunk);
+
+    const leaves = new THREE.Mesh(
+        new THREE.SphereGeometry(
+            0.6,
+            12,
+            12
+        ),
+        new THREE.MeshStandardMaterial({
+            color:0x4ecb71
+        })
+    );
+
+    leaves.position.set(
+        x,
+        2.2,
+        z
+    );
+
+    scene.add(leaves);
+}
+
+tree(-5,-3);
+tree(5,-3);
+
+/* ANIMATION */
+
+function animate(){
+
+    requestAnimationFrame(
+        animate
+    );
+
+    const t =
+    Date.now()*0.002;
+
+    bag.rotation.y =
+    Math.sin(t)*0.2;
+
+    bulbs.forEach((b,i)=>{
+
+        const hue =
+        (t*0.1+i*0.08)%1;
+
+        b.material.color.setHSL(
+            hue,
+            1,
+            0.6
+        );
+
+        b.material.emissive.setHSL(
+            hue,
+            1,
+            0.5
+        );
+    });
+
+    renderer.render(
+        scene,
+        camera
+    );
+}
+
+animate();
+
+window.addEventListener(
+'resize',
+()=>{
+
+    camera.aspect =
+    window.innerWidth/
+    window.innerHeight;
+
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(
+        window.innerWidth,
+        window.innerHeight
+    );
+
+});
+
+</script>
+
+</body>
+</html>
