@@ -7,7 +7,7 @@ const startGame = () => {
     try {
         const game = new City3DGame({
             containerId: 'game-container',
-            gridSize: 9,
+            gridSize: 5,
             cellSize: 6,
             buildingCost: 50,
             coinIncrement: 50

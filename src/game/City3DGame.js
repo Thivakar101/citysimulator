@@ -7,11 +7,13 @@ class City3DGame {
     this.container = document.getElementById(containerId);
     this.gridSize = gridSize;
     this.cellSize = cellSize; // world units per cell (meters)
+    this.baseGridSize = gridSize;
 
   this.happinessPoints = 0;
   this.population = 0;
   this.happiness = 1.0; // 0..1
   this.level = 1;
+  this.maxLevel = 4;
   this.buildings = []; // store meshes
   this.grid = Array.from({ length: gridSize }, () => Array(gridSize).fill(null));
   this.raycaster = new THREE.Raycaster();
@@ -37,8 +39,21 @@ class City3DGame {
   this.visitors = [];
   this._carSpawnTimer = 0;
   this._maxCars = 6;
+  this._levelTransitionPending = false;
   // Simulation speed control (0 = paused, 1/2/3 = normal/2x/3x)
   this.timeScale = 1;
+
+  // Building registry: maps building type to its unlock level
+  this.buildingRegistry = {
+    // Level 1
+    house1: { level: 1 }, factory: { level: 1 }, tower: { level: 1 }, shop: { level: 1 },
+    // Level 2
+    house2: { level: 2 }, apartment: { level: 2 }, clockTower: { level: 2 },
+    // Level 3
+    skyscraper: { level: 3 }, hospital: { level: 3 }, fireStation: { level: 3 },
+    // Level 4
+    school: { level: 4 }, library: { level: 4 }, bakery: { level: 4 },
+  };
 
     this._initThree();
     this._initScene();
@@ -102,6 +117,7 @@ class City3DGame {
     // Ground plane (grid)
   const planeSize = this.gridSize * this.cellSize;
   const half = planeSize / 2;
+  const gridColors = this._getGridHelperColors();
 
   const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(planeSize, planeSize),
@@ -114,7 +130,7 @@ class City3DGame {
     this.ground = ground;
 
   // Grid helper lines
-  const gridHelper = new THREE.GridHelper(planeSize, this.gridSize, 0x3a3e4a, 0x2a2e38);
+  const gridHelper = new THREE.GridHelper(planeSize, this.gridSize, gridColors.major, gridColors.minor);
   gridHelper.position.set(half, 0.01, half); // align to ground and avoid z-fighting
     this.scene.add(gridHelper);
     this.gridHelper = gridHelper;
@@ -242,6 +258,54 @@ class City3DGame {
     return { x, z };
   }
 
+  _getLevelGridSize(level = this.level) {
+    return this.baseGridSize + Math.max(0, level - 1) * 2;
+  }
+
+  _getLevelProgressTarget() {
+    return this.gridSize * this.gridSize;
+  }
+
+  _countFilledCells() {
+    let filled = 0;
+    for (let r = 0; r < this.gridSize; r++) {
+      for (let c = 0; c < this.gridSize; c++) {
+        if (this.grid[r][c]) filled++;
+      }
+    }
+    return filled;
+  }
+
+  _isGridFull() {
+    return this._countFilledCells() >= this._getLevelProgressTarget();
+  }
+
+  _checkLevelProgression() {
+    if (this._levelTransitionPending || this.level >= this.maxLevel || !this._isGridFull()) return false;
+
+    this.level++;
+    this.happinessPoints += 25;
+    this._feed(`Level up! ${this.level}`);
+    this._toastAtCell(Math.floor(this.gridSize / 2), Math.floor(this.gridSize / 2), `🎉 Level Up! Now Level ${this.level}`);
+
+    this._levelTransitionPending = true;
+    try {
+      this._expandGridByOneRing();
+    } finally {
+      this._levelTransitionPending = false;
+    }
+
+    this._updateUI();
+    return true;
+  }
+
+  _getGridHelperColors() {
+    return {
+      major: 0x64707d,
+      minor: 0x92a0ac,
+    };
+  }
+
   _worldToGrid(x, z) {
     const col = Math.floor(x / this.cellSize);
     const row = Math.floor(z / this.cellSize);
@@ -253,10 +317,16 @@ class City3DGame {
     const el = this.ui[id];
     if (!el) return;
     el.addEventListener('click', () => {
+      // Check if building is locked
+      const reg = this.buildingRegistry[placement.type];
+      if (reg && reg.level > this.level) {
+        this._toastAtCell(Math.floor(this.gridSize/2), Math.floor(this.gridSize/2), `🔒 Unlock at Level ${reg.level}!`);
+        return;
+      }
       this.currentPlacement = placement; // {type, cost}
       this.isRelocating = null;
       this._ensureGhost(placement.type);
-  this.placementRotation = 0;
+      this.placementRotation = 0;
       this._updateUI();
     });
   }
@@ -297,8 +367,12 @@ class City3DGame {
     if (this.ghost) {
       this.ghost.position.set(x, 0.01, z);
       this.ghost.visible = true;
-  const free = !this.grid[row][col];
-  this._setGhostColor(this.ghost, free ? 0x66ff99 : 0xff6666);
+      const free = !this.grid[row][col];
+      const placementType = this.currentPlacement ? this.currentPlacement.type : (this.isRelocating ? this.isRelocating.userData.type : null);
+      const reg = placementType ? this.buildingRegistry[placementType] : null;
+      const unlocked = !reg || reg.level <= this.level;
+      const canPlace = free && unlocked;
+      this._setGhostColor(this.ghost, canPlace ? 0x66ff99 : 0xff6666);
     }
   }
 
@@ -346,7 +420,13 @@ class City3DGame {
     }
 
     if (!this.currentPlacement) return;
-  if (this.grid[row][col]) return; // occupied
+    // Check unlock level
+    const reg = this.buildingRegistry[this.currentPlacement.type];
+    if (reg && reg.level > this.level) {
+      this._toastAtCell(row, col, `Unlock at Level ${reg.level}!`);
+      return;
+    }
+    if (this.grid[row][col]) return; // occupied
     if (this.currentPlacement.isDecoration && this.happinessPoints < this.currentPlacement.cost) {
       this._toastAtCell(row, col, "Not enough Happiness Points!");
       return; // not enough points
@@ -402,14 +482,29 @@ class City3DGame {
     if (this.ghost) { this.scene.remove(this.ghost); this.ghost = null; }
   }
 
+  _onKeyDown(e) {
+    if (e.key === 'r' || e.key === 'R') {
+      this.placementRotation += Math.PI / 2;
+      if (this.ghost) this.ghost.rotation.y = this.placementRotation;
+    }
+    if (e.key === 'Escape') {
+      this._cancelPlacement();
+      const cancelBtn = document.getElementById('cancelPlacement');
+      if (cancelBtn) cancelBtn.classList.remove('visible');
+    }
+  }
+
   _createBuildingMesh(type, opts = {}) {
     const ghost = !!opts.ghost;
     const heightBy = {
       road: 0.1,
-      house: 1.2,
-      tower: 2.0,
+      house1: 1.2, house2: 1.2,
+      tower: 2.0, apartment: 1.5, clockTower: 2.2, skyscraper: 3.0,
       factory: 1.0,
-      park: 0.2,
+      shop: 0.8,
+      hospital: 1.2, fireStation: 0.8,
+      school: 0.9, library: 1.1, bakery: 0.7,
+      park: 0.2, treeA: 0.8, treeB: 0.9, flowerGarden: 0.2,
     };
     const h = (this.cellSize) * (heightBy[type] || 1.0);
     return this._createAssetMesh(type, ghost, h);
@@ -582,7 +677,7 @@ class City3DGame {
     if (this.personAssetPromise) return this.personAssetPromise;
     this.personAssetPromise = import('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/loaders/GLTFLoader.js')
       .then(({ GLTFLoader }) => import('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/utils/SkeletonUtils.js')
-        .then(({ SkeletonUtils }) => new Promise((resolve, reject) => {
+        .then((SkeletonUtils) => new Promise((resolve, reject) => {
           const loader = new GLTFLoader();
           loader.load(
             'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/CesiumMan/glTF-Binary/CesiumMan.glb',
@@ -605,7 +700,8 @@ class City3DGame {
   _makePersonModel() {
     if (!this.personAssetScene) return null;
     const { scene, animations, SkeletonUtils } = this.personAssetScene;
-    const clone = SkeletonUtils.clone(scene);
+    if (!scene) return null;
+    const clone = SkeletonUtils?.clone ? SkeletonUtils.clone(scene) : scene.clone(true);
     clone.traverse((child) => {
       if (!child.isMesh) return;
       child.castShadow = true;
@@ -684,12 +780,8 @@ class City3DGame {
     const url = ASSETS[type];
     if (!url) return Promise.reject(new Error(`No asset mapping for ${type}`));
 
-    // Immediately reject placeholder URLs
-    if (url.includes('.glb') && (url === './.glb' || url.startsWith('./placeholder') || url.includes('house') || url.includes('factory') || url.includes('tower') || url.includes('shop') || url.includes('clock') || url.includes('sky') || url.includes('hosp') || url.includes('fire') || url.includes('school') || url.includes('lib') || url.includes('bakery') || url.includes('tree') || url.includes('flower') || url.includes('park') || url.includes('apart'))) {
-      // If the file doesn't actually exist on the user's system, we want to immediately fallback.
-      // For this sandbox we will assume any local `./name.glb` that isn't explicitly known to exist should fallback.
-      // We will try to fetch it, but if it 404s, we catch and fallback gracefully.
-    }
+    // Asset loading: the GLTFLoader's error handler already falls back to
+    // procedural meshes gracefully, so no pre-filtering is needed.
 
     this.assetPromises[type] = import('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/loaders/GLTFLoader.js')
       .then(({ GLTFLoader }) => new Promise((resolve, reject) => {
@@ -765,6 +857,22 @@ class City3DGame {
       mesh.position.set(x, y, z);
       return mesh;
     };
+
+    const bodyH = {
+      house1: cellSize * 0.8,
+      house2: cellSize * 1.0,
+      factory: cellSize * 0.7,
+      tower: cellSize * 1.8,
+      shop: cellSize * 0.6,
+      apartment: cellSize * 1.5,
+      clockTower: cellSize * 2.0,
+      skyscraper: cellSize * 3.0,
+      hospital: cellSize * 1.2,
+      fireStation: cellSize * 0.8,
+      school: cellSize * 0.9,
+      library: cellSize * 1.1,
+      bakery: cellSize * 0.7,
+    }[type] || cellSize;
 
     let meshes = [];
 
@@ -1019,22 +1127,6 @@ class City3DGame {
         meshes.push(this._makeTrimMesh(baseSize * 0.92, cellSize * 0.05, baseSize * 0.92, 0, y, 0, color, ghost));
       };
 
-      const bodyH = {
-        house1: cellSize * 0.8,
-        house2: cellSize * 1.0,
-        factory: cellSize * 0.7,
-        tower: cellSize * 1.8,
-        shop: cellSize * 0.6,
-        apartment: cellSize * 1.5,
-        clockTower: cellSize * 2.0,
-        skyscraper: cellSize * 3.0,
-        hospital: cellSize * 1.2,
-        fireStation: cellSize * 0.8,
-        school: cellSize * 0.9,
-        library: cellSize * 1.1,
-        bakery: cellSize * 0.7,
-      }[type] || cellSize;
-
       addBand(bodyH * 0.48, 0x708090);
       addBand(bodyH * 0.72, 0x8a96a6);
       addCorner(baseSize * 0.39, bodyH * 0.52, baseSize * 0.39, bodyH * 0.86);
@@ -1132,25 +1224,38 @@ class City3DGame {
     if (this.levelTextEl) this.levelTextEl.textContent = `Level ${this.level}`;
     
     // Count filled slots for progression
-    let filled = 0;
-    for (let r=0; r<this.gridSize; r++) {
-      for (let c=0; c<this.gridSize; c++) {
-        if (this.grid[r][c]) filled++;
-      }
-    }
-    const total = this.gridSize * this.gridSize;
-    if (this.progressTextEl) this.progressTextEl.textContent = `${filled}/${total}`;
+    const filled = this._countFilledCells();
+    const target = this._getLevelProgressTarget();
+    if (this.progressTextEl) this.progressTextEl.textContent = `${filled}/${target}`;
     
     if (this.happyPointsTextEl) this.happyPointsTextEl.textContent = `${this.happinessPoints}`;
     if (this.happyTextEl) this.happyTextEl.textContent = `${Math.round(this.happiness*100)}%`;
 
-    // Manage UI unlock groups based on level
-    const l2 = document.getElementById('lvl2Group');
-    const l3 = document.getElementById('lvl3Group');
-    const l4 = document.getElementById('lvl4Group');
-    if (l2) l2.style.display = 'flex';
-    if (l3) l3.style.display = 'flex';
-    if (l4) l4.style.display = 'flex';
+    // Show all level groups; disable locked building buttons
+    for (let lvl = 1; lvl <= this.maxLevel; lvl++) {
+      const group = document.getElementById(`lvl${lvl}Group`);
+      if (!group) continue;
+      group.style.display = 'flex';
+      const buttons = group.querySelectorAll('.build-btn');
+      buttons.forEach(btn => {
+        if (lvl > this.level) {
+          btn.disabled = true;
+          btn.classList.add('locked');
+          // Add lock overlay if not present
+          if (!btn.querySelector('.lock-overlay')) {
+            const lock = document.createElement('span');
+            lock.className = 'lock-overlay';
+            lock.textContent = '🔒 Lvl ' + lvl;
+            btn.appendChild(lock);
+          }
+        } else {
+          btn.disabled = false;
+          btn.classList.remove('locked');
+          const lock = btn.querySelector('.lock-overlay');
+          if (lock) lock.remove();
+        }
+      });
+    }
   }
 
   _estimateIncomePerSecond() {
@@ -1219,24 +1324,7 @@ class City3DGame {
     const avgH = housesCount ? (happinessSum / housesCount) : 1.0;
     this.happiness = Math.max(0.0, Math.min(1.0, avgH));
     
-    // Level progression based on filled plots
-    let filledCount = 0;
-    for (let r=0; r<this.gridSize; r++){
-      for (let c=0; c<this.gridSize; c++){
-        if (this.grid[r][c]) filledCount++;
-      }
-    }
-    
-    if (filledCount >= this.gridSize * this.gridSize && this.gridSize < 25) { // Arbitrary max grid size check
-      this.level++;
-      this.happinessPoints += 25; // Reward
-      this._feed(`Level up! ${this.level}`);
-      this._toastAtCell(Math.floor(this.gridSize/2), Math.floor(this.gridSize/2), `Level Up!`);
-      // Schedule expansion
-      setTimeout(() => {
-        this._expandGridByOneRing();
-      }, 600);
-    }
+    this._checkLevelProgression();
     
     this._updateUI();
   }
@@ -1257,7 +1345,8 @@ class City3DGame {
 
   _expandGridByOneRing() {
     const oldSize = this.gridSize;
-    const newSize = oldSize + 5; // Expand by 5 units (adding another grid next to it)
+    const newSize = this._getLevelGridSize(this.level);
+    if (newSize <= oldSize) return;
     const newGrid = Array.from({ length: newSize }, () => Array(newSize).fill(null));
 
     // Despawn all smoke puffs (visual-only) to avoid odd offsets
@@ -1321,6 +1410,7 @@ class City3DGame {
 
     const planeSize = this.gridSize * this.cellSize;
     const half = planeSize / 2;
+    const gridColors = this._getGridHelperColors();
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(planeSize, planeSize),
       this._getThemeMaterial('concrete', false)
@@ -1331,7 +1421,7 @@ class City3DGame {
     this.scene.add(ground);
     this.ground = ground;
 
-    const gridHelper = new THREE.GridHelper(planeSize, this.gridSize, 0x3a3e4a, 0x2a2e38);
+    const gridHelper = new THREE.GridHelper(planeSize, this.gridSize, gridColors.major, gridColors.minor);
     gridHelper.position.set(half, 0.01, half);
     this.scene.add(gridHelper);
     this.gridHelper = gridHelper;

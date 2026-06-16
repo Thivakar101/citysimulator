@@ -15,6 +15,9 @@ export class CoCCameraController {
     this.zoomSpeed = 0.0015; // wheel delta -> distance
     this.target = new THREE.Vector3();
     this.bounds = { minX: -Infinity, maxX: Infinity, minZ: -Infinity, maxZ: Infinity };
+    this._last = new THREE.Vector2();
+    this._dragging = false;
+    this._didDragLastGesture = false;
 
     this._isRotating = false;
 

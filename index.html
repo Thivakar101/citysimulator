@@ -163,6 +163,34 @@
             transform: scale(0.96);
         }
 
+        .build-btn.locked {
+            opacity: 0.5;
+            cursor: not-allowed;
+            filter: grayscale(60%);
+            position: relative;
+            pointer-events: auto;
+        }
+
+        .build-btn.locked:hover {
+            transform: none;
+            border-color: inherit;
+            box-shadow: none;
+        }
+
+        .lock-overlay {
+            position: absolute;
+            bottom: 4px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            background: rgba(0,0,0,0.65);
+            color: #fff;
+            border-radius: 6px;
+            padding: 1px 6px;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+
         .build-btn.road {
             background: #eef2f7;
             border-color: #cbd5e1;
@@ -355,7 +383,7 @@
         <div id="hud">
             <div class="hud-stat"><span class="emoji">⭐</span> <span id="levelText">Level 1</span></div>
             <div class="hud-sep"></div>
-            <div class="hud-stat"><span class="emoji">📈</span> <span id="progressText">0/9</span></div>
+            <div class="hud-stat"><span class="emoji">📈</span> <span id="progressText">0/25</span></div>
             <div class="hud-sep"></div>
             <div class="hud-stat"><span class="emoji">💖</span> <span id="happinessPointsText">0</span></div>
             <div class="hud-sep"></div>
@@ -420,7 +448,7 @@
                 </button>
             </div>
 
-            <div class="store-level-group" id="lvl4Group">
+            <div class="store-level-group" id="lvl4Group" >
                 <div class="store-level-title">Level 4</div>
                 <button class="build-btn tower" id="buySchool">
                     <span class="btn-emoji">🏫</span>
