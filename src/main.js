@@ -1,15 +1,13 @@
-import { City3DGame } from './threecity.js';
+import { City3DGame } from './game/City3DGame.js';
 
-window.addEventListener('DOMContentLoaded', () => {
+const startGame = () => {
     const statusEl = document.getElementById('status');
     const showError = (msg) => { statusEl.textContent = msg; statusEl.style.display = 'block'; };
 
     try {
-        if (!window.THREE) throw new Error('3D engine failed to load. Check your internet.');
-
         const game = new City3DGame({
             containerId: 'game-container',
-            gridSize: 5,
+            gridSize: 9,
             cellSize: 6,
             buildingCost: 50,
             coinIncrement: 50
@@ -47,4 +45,10 @@ window.addEventListener('DOMContentLoaded', () => {
         console.error(e);
         showError('Oops! Something went wrong: ' + e.message);
     }
-});
+};
+
+if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', startGame);
+} else {
+    startGame();
+}

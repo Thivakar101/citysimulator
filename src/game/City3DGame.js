@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CoCCameraController } from './camera.js';
+import { CoCCameraController } from './CoCCameraController.js';
 import { ASSETS } from './assets.js';
 
 class City3DGame {
@@ -19,24 +19,31 @@ class City3DGame {
   this.ghost = null; // preview mesh
   this.currentPlacement = null; // { type, cost }
   this.isRelocating = null; // building being moved
-  this.textureCache = {};
+  this._geoCache = {};
+  this._matCache = {};
+  this._textureCache = {};
   this.assetScenes = {};
   this.assetPromises = {};
+  this.surfaceThemes = {};
+  this.surfaceThemePromise = null;
+  this.personAssetPromise = null;
+  this.personAssetScene = null;
   this.placementRotation = 0; // radians; used during placement
   this.smokePuffs = [];
+  this.liveBuildingParts = [];
   this._lastTime = performance.now() * 0.001;
   this.cars = [];
   this.people = [];
+  this.visitors = [];
   this._carSpawnTimer = 0;
   this._maxCars = 6;
-  // Street lights
-  this.streetLightPoints = [];
   // Simulation speed control (0 = paused, 1/2/3 = normal/2x/3x)
   this.timeScale = 1;
-  this._lastLevel = 1;
 
     this._initThree();
     this._initScene();
+    this._bootstrapSurfaceThemes();
+    this._bootstrapPersonAsset();
     this._animate();
     this._updateUI();
     this._bindResize();
@@ -98,7 +105,7 @@ class City3DGame {
 
   const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(planeSize, planeSize),
-      new THREE.MeshStandardMaterial({ color: 0x1e1f25, roughness: 0.9, metalness: 0.0 })
+      this._getThemeMaterial('concrete', false)
     );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(half, 0, half);
@@ -297,7 +304,10 @@ class City3DGame {
 
   _onClick(event) {
     // Place selected type or confirm relocation
-    if (this.controls && this.controls.hasDragged) return; // avoid placing while panning
+    if (this.controls && this.controls._didDragLastGesture) {
+      this.controls._didDragLastGesture = false;
+      return; // avoid accidental placement after a pan gesture
+    }
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -325,6 +335,8 @@ class City3DGame {
         this._removePeopleForPark(mesh);
         this._spawnPeopleForPark(mesh, row, col);
       }
+      this._removeVisitorsForBuilding(mesh);
+      this._spawnVisitorsForBuilding(mesh, row, col);
 
       this.isRelocating = null;
       this._recomputeCityStats();
@@ -348,6 +360,7 @@ class City3DGame {
     this.scene.add(mesh);
     this.buildings.push(mesh);
     this.grid[row][col] = mesh;
+    this._spawnVisitorsForBuilding(mesh, row, col);
     
     if (this.currentPlacement.isDecoration) {
       this.happinessPoints -= this.currentPlacement.cost;
@@ -364,29 +377,6 @@ class City3DGame {
     this._recomputeCityStats();
     this._updateUI();
     this._feed(`Placed ${mesh.userData.type}`);
-  }
-
-  _computeRandomPatch(startR, startC, targetCount) {
-    const inside = (r,c)=> r>=0 && c>=0 && r<this.gridSize && c<this.gridSize;
-    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
-    const chosen = new Set();
-    const key = (r,c)=>`${r},${c}`;
-    const cells = [{r:startR,c:startC}];
-    chosen.add(key(startR,startC));
-    while (cells.length < targetCount) {
-      // pick a random existing cell and grow to a random neighbor
-      const base = cells[Math.floor(Math.random()*cells.length)];
-      const d = dirs[Math.floor(Math.random()*dirs.length)];
-      const nr = base.r + d[0], nc = base.c + d[1];
-      if (!inside(nr,nc)) continue;
-      const k = key(nr,nc);
-      if (chosen.has(k)) continue;
-      // avoid placing over occupied tiles
-      if (this.grid[nr][nc]) continue;
-      chosen.add(k);
-      cells.push({r:nr,c:nc});
-    }
-    return cells;
   }
 
   _onDoubleClick(event) {
@@ -425,7 +415,7 @@ class City3DGame {
     return this._createAssetMesh(type, ghost, h);
   }
 
-  _createAssetMesh(type, ghost, fallbackHeight) {
+  _createAssetMesh(type, ghost) {
     const mesh = new THREE.Group();
     mesh.userData.assetType = type;
 
@@ -453,7 +443,234 @@ class City3DGame {
       const targetScale = 1; const start = performance.now(); const duration = 450;
       const animateIn = (t) => { const e = Math.min((t - start) / duration, 1); mesh.scale.y = 0.01 + e * (targetScale - 0.01); if (e < 1) requestAnimationFrame(animateIn); };
       requestAnimationFrame(animateIn);
+      this._addLiveBuildingDetails(mesh, type);
     }
+    return mesh;
+  }
+
+  _getCachedGeometry(key, factory) {
+    if (!this._geoCache[key]) this._geoCache[key] = factory();
+    return this._geoCache[key];
+  }
+
+  _getCachedMaterial(key, factory) {
+    if (!this._matCache[key]) this._matCache[key] = factory();
+    return this._matCache[key];
+  }
+
+  _getTexture(url, colorSpace = null) {
+    if (!url) return Promise.resolve(null);
+    if (this._textureCache[url]) return this._textureCache[url];
+    this._textureCache[url] = new Promise((resolve, reject) => {
+      new THREE.TextureLoader().load(
+        url,
+        (tex) => {
+          tex.anisotropy = Math.min(8, this.renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+          if (colorSpace !== null && 'colorSpace' in tex) tex.colorSpace = colorSpace;
+          resolve(tex);
+        },
+        undefined,
+        reject
+      );
+    });
+    return this._textureCache[url];
+  }
+
+  async _loadAmbientMaterialSet(assetId) {
+    const response = await fetch(`https://ambientcg.com/api/v2/full_json?id=${encodeURIComponent(assetId)}&limit=1`);
+    const data = await response.json();
+    const asset = data?.foundAssets?.[0];
+    const previewUrl = asset?.previewLinks?.[0]?.url;
+    if (!previewUrl) throw new Error(`No preview URL for ${assetId}`);
+    const params = new URLSearchParams(new URL(previewUrl).hash.slice(1));
+    const urls = {
+      color: params.get('color_url'),
+      normal: params.get('normal_url'),
+      roughness: params.get('roughness_url'),
+      ao: params.get('ambientocclusion_url'),
+    };
+    const [color, normal, roughness, ao] = await Promise.all([
+      this._getTexture(urls.color, THREE.SRGBColorSpace),
+      this._getTexture(urls.normal, THREE.NoColorSpace),
+      this._getTexture(urls.roughness, THREE.NoColorSpace),
+      this._getTexture(urls.ao, THREE.NoColorSpace),
+    ]);
+    if (normal) normal.normalScale = new THREE.Vector2(1, -1);
+    return { color, normal, roughness, ao };
+  }
+
+  _getThemeMaterial(theme, ghost = false) {
+    const key = `theme:${theme}:${ghost ? 'ghost' : 'live'}`;
+    return this._getCachedMaterial(key, () => {
+      const palette = {
+        wall: { color: 0xddd7cc, roughness: 0.95, metalness: 0.02 },
+        roof: { color: 0x73584d, roughness: 0.85, metalness: 0.05 },
+        wood: { color: 0x8d6547, roughness: 0.9, metalness: 0.02 },
+        metal: { color: 0x9ea8b1, roughness: 0.45, metalness: 0.55 },
+        glass: { color: 0xa9d8ff, roughness: 0.05, metalness: 0.08, transparent: true, opacity: 0.68 },
+        asphalt: { color: 0x22272f, roughness: 1.0, metalness: 0.0 },
+        grass: { color: 0x638a44, roughness: 1.0, metalness: 0.0 },
+        concrete: { color: 0xa6a9ad, roughness: 0.98, metalness: 0.01 },
+        plaster: { color: 0xd7d0c5, roughness: 0.92, metalness: 0.01 },
+        water: { color: 0x4aa6d9, roughness: 0.08, metalness: 0.0, transparent: true, opacity: 0.8 },
+      };
+      const base = palette[theme] || palette.wall;
+      return new THREE.MeshStandardMaterial({
+        color: ghost ? 0xdbe3ec : base.color,
+        roughness: base.roughness,
+        metalness: base.metalness,
+        transparent: ghost ? true : !!base.transparent,
+        opacity: ghost ? 0.35 : (base.opacity ?? 1),
+        depthWrite: !ghost,
+      });
+    });
+  }
+
+  _applyTextureSetToTheme(theme, set) {
+    const mat = this._getThemeMaterial(theme, false);
+    const repeats = {
+      wall: [2, 2],
+      wood: [2, 2],
+      metal: [2, 2],
+      asphalt: [6, 6],
+      grass: [6, 6],
+      concrete: [4, 4],
+    }[theme] || [2, 2];
+    const applyRepeat = (tex) => {
+      if (!tex) return;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(repeats[0], repeats[1]);
+      tex.needsUpdate = true;
+    };
+    applyRepeat(set.color);
+    applyRepeat(set.normal);
+    applyRepeat(set.roughness);
+    applyRepeat(set.ao);
+    if (set.color) mat.map = set.color;
+    if (set.normal) mat.normalMap = set.normal;
+    if (set.roughness) mat.roughnessMap = set.roughness;
+    if (set.ao) mat.aoMap = set.ao;
+    mat.needsUpdate = true;
+  }
+
+  _bootstrapSurfaceThemes() {
+    if (this.surfaceThemePromise) return this.surfaceThemePromise;
+    const sources = {
+      wall: 'Bricks038',
+      wood: 'Wood063',
+      metal: 'PaintedMetal006',
+      asphalt: 'Asphalt031',
+      grass: 'Grass004',
+      concrete: 'Ground037',
+    };
+    this.surfaceThemePromise = Promise.all(
+      Object.entries(sources).map(async ([theme, assetId]) => {
+        try {
+          const textures = await this._loadAmbientMaterialSet(assetId);
+          this.surfaceThemes[theme] = textures;
+          this._applyTextureSetToTheme(theme, textures);
+        } catch (err) {
+          console.warn(`Texture set ${assetId} failed to load`, err.message);
+        }
+      })
+    );
+    return this.surfaceThemePromise;
+  }
+
+  _bootstrapPersonAsset() {
+    if (this.personAssetPromise) return this.personAssetPromise;
+    this.personAssetPromise = import('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/loaders/GLTFLoader.js')
+      .then(({ GLTFLoader }) => import('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/utils/SkeletonUtils.js')
+        .then(({ SkeletonUtils }) => new Promise((resolve, reject) => {
+          const loader = new GLTFLoader();
+          loader.load(
+            'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/CesiumMan/glTF-Binary/CesiumMan.glb',
+            (gltf) => resolve({ scene: gltf.scene, animations: gltf.animations, SkeletonUtils }),
+            undefined,
+            () => resolve(null)
+          );
+        })))
+      .then((bundle) => {
+        this.personAssetScene = bundle;
+        return bundle;
+      })
+      .catch((err) => {
+        console.warn('Person asset load failed, using fallback people.', err.message);
+        return null;
+      });
+    return this.personAssetPromise;
+  }
+
+  _makePersonModel() {
+    if (!this.personAssetScene) return null;
+    const { scene, animations, SkeletonUtils } = this.personAssetScene;
+    const clone = SkeletonUtils.clone(scene);
+    clone.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+      if (child.material) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const mat of mats) {
+          if (mat.color) {
+            const tint = new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.02, 0.12), 0.45, THREE.MathUtils.randFloat(0.45, 0.72));
+            mat.color.multiply(tint);
+          }
+        }
+      }
+    });
+    const mixer = animations?.length ? new THREE.AnimationMixer(clone) : null;
+    if (mixer && animations.length) {
+      const action = mixer.clipAction(animations[0]);
+      action.play();
+    }
+    clone.scale.setScalar(this.cellSize * 0.035);
+    clone.rotation.y = Math.PI;
+    return { model: clone, mixer };
+  }
+
+  _makeWindowMesh(w, h, d, x, y, z, color = 0xcfe8ff, emissive = 0xffd36b, ghost = false) {
+    const mat = this._getCachedMaterial(`win:${color.toString(16)}:${emissive.toString(16)}:${ghost}`, () => new THREE.MeshStandardMaterial({
+      color: ghost ? 0xd7e3ee : color,
+      emissive: ghost ? 0x000000 : emissive,
+      emissiveIntensity: ghost ? 0.0 : 0.22,
+      roughness: 0.2,
+      metalness: 0.65,
+      transparent: !!ghost,
+      opacity: ghost ? 0.35 : 1,
+      depthWrite: !ghost,
+    }));
+    const mesh = new THREE.Mesh(this._getCachedGeometry(`win:${w}:${h}:${d}`, () => new THREE.BoxGeometry(w, h, d)), mat);
+    mesh.position.set(x, y, z);
+    return mesh;
+  }
+
+  _makeTrimMesh(w, h, d, x, y, z, color, ghost = false) {
+    const mat = this._getCachedMaterial(`trim:${color.toString(16)}:${ghost}`, () => new THREE.MeshStandardMaterial({
+      color: ghost ? 0xd3dce6 : color,
+      roughness: 0.55,
+      metalness: 0.08,
+      transparent: !!ghost,
+      opacity: ghost ? 0.28 : 1,
+      depthWrite: !ghost,
+    }));
+    const mesh = new THREE.Mesh(this._getCachedGeometry(`trim:${w}:${h}:${d}`, () => new THREE.BoxGeometry(w, h, d)), mat);
+    mesh.position.set(x, y, z);
+    return mesh;
+  }
+
+  _makeCylinderDetail(rt, rb, h, seg, x, y, z, color, ghost = false) {
+    const mat = this._getCachedMaterial(`cyl:${color.toString(16)}:${ghost}`, () => new THREE.MeshStandardMaterial({
+      color: ghost ? 0xdbe3ec : color,
+      roughness: 0.45,
+      metalness: 0.18,
+      transparent: !!ghost,
+      opacity: ghost ? 0.28 : 1,
+      depthWrite: !ghost,
+    }));
+    const mesh = new THREE.Mesh(this._getCachedGeometry(`cyl:${rt}:${rb}:${h}:${seg}`, () => new THREE.CylinderGeometry(rt, rb, h, seg)), mat);
+    mesh.position.set(x, y, z);
     return mesh;
   }
 
@@ -504,8 +721,34 @@ class City3DGame {
     const cellSize = this.cellSize;
     const baseSize = cellSize * 0.85;
     
-    // Kid-friendly material helper
+    // Kid-friendly material helper with real textured theme materials when possible.
     const getMat = (colorHex) => {
+      const themeMap = new Map([
+        [0x28313d, 'asphalt'],
+        [0xffe2b3, 'wall'],
+        [0xa3e4d7, 'wall'],
+        [0xe67e22, 'wall'],
+        [0x3498db, 'concrete'],
+        [0x2ecc71, 'grass'],
+        [0xe74c3c, 'wall'],
+        [0xecf0f1, 'concrete'],
+        [0x1abc9c, 'plaster'],
+        [0xd35400, 'wood'],
+        [0xffffff, 'concrete'],
+        [0xc0392b, 'roof'],
+        [0x34495e, 'metal'],
+        [0xf1c40f, 'roof'],
+        [0x27ae60, 'grass'],
+        [0x9b59b6, 'wall'],
+        [0xbdc3c7, 'metal'],
+        [0xf39c12, 'roof'],
+        [0x2ecc71, 'grass'],
+        [0x95a5a6, 'concrete'],
+        [0x8e44ad, 'wood'],
+        [0x8fc9f0, 'water'],
+      ]);
+      const theme = themeMap.get(colorHex);
+      if (theme) return this._getThemeMaterial(theme, ghost);
       return new THREE.MeshStandardMaterial({
         color: ghost ? 0xcfd8e3 : colorHex,
         roughness: 0.6,
@@ -516,7 +759,7 @@ class City3DGame {
       });
     };
     
-    const winMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1, emissive: 0xffffff, emissiveIntensity: 0.15, roughness: 0.2, metalness: 0.8 });
+    const winMat = this._getThemeMaterial('glass', ghost);
     const createWin = (w, h, x, y, z) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.1), winMat);
       mesh.position.set(x, y, z);
@@ -526,6 +769,27 @@ class City3DGame {
     let meshes = [];
 
     switch (type) {
+      case 'road': {
+        const roadGeo = new THREE.BoxGeometry(baseSize, cellSize * 0.04, baseSize);
+        const road = new THREE.Mesh(roadGeo, getMat(0x28313d));
+        road.position.y = cellSize * 0.02;
+        const stripeMat = new THREE.MeshStandardMaterial({
+          color: ghost ? 0xcfd8e3 : 0xf7e36a,
+          emissive: ghost ? 0x000000 : 0x3a3000,
+          emissiveIntensity: ghost ? 0 : 0.18,
+          roughness: 0.45,
+          opacity: ghost ? 0.35 : 1,
+          transparent: !!ghost,
+          depthWrite: !ghost,
+        });
+        for (let i = -1; i <= 1; i++) {
+          const stripe = new THREE.Mesh(new THREE.BoxGeometry(cellSize * 0.08, cellSize * 0.012, cellSize * 0.36), stripeMat);
+          stripe.position.set(i * cellSize * 0.24, cellSize * 0.055, 0);
+          meshes.push(stripe);
+        }
+        meshes.push(road);
+        break;
+      }
       case 'house1': {
         const bodyGeo = new THREE.BoxGeometry(baseSize * 0.8, cellSize * 0.8, baseSize * 0.8);
         const body = new THREE.Mesh(bodyGeo, getMat(0xffe2b3));
@@ -746,6 +1010,68 @@ class City3DGame {
       }
     }
 
+    // Extra facade dressing makes the primitives read more like real buildings.
+    if (!['road', 'treeA', 'treeB', 'flowerGarden', 'park'].includes(type)) {
+      const addCorner = (x, y, z, h, color = 0x8591a3) => {
+        meshes.push(this._makeTrimMesh(cellSize * 0.06, h, cellSize * 0.05, x, y, z, color, ghost));
+      };
+      const addBand = (y, color = 0x6f7d8f) => {
+        meshes.push(this._makeTrimMesh(baseSize * 0.92, cellSize * 0.05, baseSize * 0.92, 0, y, 0, color, ghost));
+      };
+
+      const bodyH = {
+        house1: cellSize * 0.8,
+        house2: cellSize * 1.0,
+        factory: cellSize * 0.7,
+        tower: cellSize * 1.8,
+        shop: cellSize * 0.6,
+        apartment: cellSize * 1.5,
+        clockTower: cellSize * 2.0,
+        skyscraper: cellSize * 3.0,
+        hospital: cellSize * 1.2,
+        fireStation: cellSize * 0.8,
+        school: cellSize * 0.9,
+        library: cellSize * 1.1,
+        bakery: cellSize * 0.7,
+      }[type] || cellSize;
+
+      addBand(bodyH * 0.48, 0x708090);
+      addBand(bodyH * 0.72, 0x8a96a6);
+      addCorner(baseSize * 0.39, bodyH * 0.52, baseSize * 0.39, bodyH * 0.86);
+      addCorner(-baseSize * 0.39, bodyH * 0.52, baseSize * 0.39, bodyH * 0.86);
+      addCorner(baseSize * 0.39, bodyH * 0.52, -baseSize * 0.39, bodyH * 0.86);
+      addCorner(-baseSize * 0.39, bodyH * 0.52, -baseSize * 0.39, bodyH * 0.86);
+    }
+
+    if (type === 'house1' || type === 'house2' || type === 'bakery') {
+      meshes.push(this._makeTrimMesh(baseSize * 0.5, cellSize * 0.08, baseSize * 0.28, 0, cellSize * 0.11, baseSize * 0.34, 0x63463a, ghost));
+      meshes.push(this._makeCylinderDetail(cellSize * 0.08, cellSize * 0.09, cellSize * 0.28, 8, -baseSize * 0.18, cellSize * 0.86, -baseSize * 0.12, 0x8a6a52, ghost));
+    }
+
+    if (type === 'factory') {
+      meshes.push(this._makeCylinderDetail(cellSize * 0.08, cellSize * 0.11, cellSize * 0.82, 10, baseSize * 0.28, cellSize * 0.86, baseSize * 0.26, 0xadb9c6, ghost));
+      meshes.push(this._makeTrimMesh(baseSize * 0.88, cellSize * 0.06, baseSize * 0.15, 0, cellSize * 0.76, baseSize * 0.42, 0x374656, ghost));
+    }
+
+    if (type === 'shop' || type === 'bakery') {
+      meshes.push(this._makeTrimMesh(baseSize * 0.74, cellSize * 0.12, baseSize * 0.16, 0, cellSize * 0.52, baseSize * 0.43, type === 'shop' ? 0xf9d34d : 0xffc857, ghost));
+      meshes.push(this._makeTrimMesh(baseSize * 0.56, cellSize * 0.18, baseSize * 0.03, 0, cellSize * 0.24, baseSize * 0.48, 0xffffff, ghost));
+    }
+
+    if (type === 'apartment' || type === 'tower' || type === 'skyscraper' || type === 'clockTower') {
+      meshes.push(this._makeTrimMesh(baseSize * 0.82, cellSize * 0.07, baseSize * 0.82, 0, bodyH * 0.94, 0, 0x617183, ghost));
+      meshes.push(this._makeCylinderDetail(cellSize * 0.03, cellSize * 0.03, bodyH * 0.22, 8, 0, bodyH * 1.02, 0, 0xd9e7f3, ghost));
+    }
+
+    if (type === 'hospital' || type === 'school' || type === 'library' || type === 'fireStation') {
+      meshes.push(this._makeTrimMesh(baseSize * 0.72, cellSize * 0.1, baseSize * 0.1, 0, cellSize * 0.18, baseSize * 0.45, 0xffffff, ghost));
+    }
+
+    if (type === 'park') {
+      meshes.push(this._makeTrimMesh(baseSize * 0.74, cellSize * 0.03, baseSize * 0.74, 0, cellSize * 0.11, 0, 0x6cab64, ghost));
+      meshes.push(this._makeCylinderDetail(cellSize * 0.24, cellSize * 0.24, cellSize * 0.07, 12, 0, cellSize * 0.22, 0, 0x8fc9f0, ghost));
+    }
+
     meshes.forEach(m => {
       m.castShadow = !ghost;
       m.receiveShadow = !ghost;
@@ -796,77 +1122,10 @@ class City3DGame {
     }
   }
 
-  _onKeyDown(e) {
-    if (!this.ghost) return;
-    if (e.key === 'r' || e.key === 'R') {
-      this.placementRotation = (this.placementRotation + Math.PI/2) % (Math.PI*2);
-      this.ghost.rotation.y = this.placementRotation;
-    }
-  }
-
   _isRoadCell(row, col) {
     if (row < 0 || col < 0 || row >= this.gridSize || col >= this.gridSize) return false;
     const m = this.grid[row][col];
     return !!(m && m.userData && m.userData.type === 'road');
-  }
-
-
-  _onKeyDown(e) {
-    if (!this.ghost) return;
-    if (this.currentPlacement && this.currentPlacement.type === 'road') return; // auto-connect; ignore rotation for roads
-    if (e.key === 'r' || e.key === 'R') {
-      // Rotate placement by 90 degrees
-      this.placementRotation = (this.placementRotation + Math.PI/2) % (Math.PI*2);
-      this.ghost.rotation.y = this.placementRotation;
-    }
-  }
-
-
-  _addBuilding() {
-    const idx = this.buildings.length;
-    const row = Math.floor(idx / this.gridSize);
-    const col = idx % this.gridSize;
-    const { x, z } = this._gridToWorld(col, row);
-
-    // Randomized tower-like building
-    const baseSize = this.cellSize * 0.8;
-    const height = THREE.MathUtils.randFloat(this.cellSize * 1.2, this.cellSize * 2.2);
-    const color = new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.55, 0.7), 0.5, 0.6);
-
-    const geo = new THREE.BoxGeometry(baseSize, height, baseSize);
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.2, emissive: 0x0b0b10, emissiveIntensity: 0.3 });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.position.set(x, height / 2, z);
-
-    // Entrance detail
-    const doorGeo = new THREE.BoxGeometry(baseSize * 0.25, height * 0.12, baseSize * 0.05);
-    const door = new THREE.Mesh(doorGeo, new THREE.MeshStandardMaterial({ color: 0x1b1f2a, metalness: 0.5, roughness: 0.3 }));
-    door.position.set(0, -height * 0.35, baseSize * 0.53);
-    mesh.add(door);
-
-    // Roof detail
-    const roofGeo = new THREE.ConeGeometry(baseSize * 0.4, baseSize * 0.3, 4);
-    const roof = new THREE.Mesh(roofGeo, new THREE.MeshStandardMaterial({ color: color.clone().offsetHSL(0, -0.1, 0.1) }));
-    roof.position.y = height * 0.55;
-    roof.rotation.y = Math.PI / 4;
-    mesh.add(roof);
-
-    // Pop-in animation
-    mesh.scale.y = 0.01;
-    const targetScale = 1;
-    const start = performance.now();
-    const duration = 500;
-    const animateIn = (t) => {
-      const e = Math.min((t - start) / duration, 1);
-      mesh.scale.y = 0.01 + e * (targetScale - 0.01);
-      if (e < 1) requestAnimationFrame(animateIn);
-    };
-    requestAnimationFrame(animateIn);
-
-    this.scene.add(mesh);
-    this.buildings.push(mesh);
   }
 
   _updateUI() {
@@ -889,9 +1148,9 @@ class City3DGame {
     const l2 = document.getElementById('lvl2Group');
     const l3 = document.getElementById('lvl3Group');
     const l4 = document.getElementById('lvl4Group');
-    if (l2) l2.style.display = this.level >= 2 ? 'flex' : 'none';
-    if (l3) l3.style.display = this.level >= 3 ? 'flex' : 'none';
-    if (l4) l4.style.display = this.level >= 4 ? 'flex' : 'none';
+    if (l2) l2.style.display = 'flex';
+    if (l3) l3.style.display = 'flex';
+    if (l4) l4.style.display = 'flex';
   }
 
   _estimateIncomePerSecond() {
@@ -971,7 +1230,6 @@ class City3DGame {
     if (filledCount >= this.gridSize * this.gridSize && this.gridSize < 25) { // Arbitrary max grid size check
       this.level++;
       this.happinessPoints += 25; // Reward
-      this._lastLevel = this.level;
       this._feed(`Level up! ${this.level}`);
       this._toastAtCell(Math.floor(this.gridSize/2), Math.floor(this.gridSize/2), `Level Up!`);
       // Schedule expansion
@@ -1065,7 +1323,7 @@ class City3DGame {
     const half = planeSize / 2;
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(planeSize, planeSize),
-      new THREE.MeshStandardMaterial({ color: 0x1e1f25, roughness: 0.9, metalness: 0.0 })
+      this._getThemeMaterial('concrete', false)
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(half, 0, half);
@@ -1079,6 +1337,208 @@ class City3DGame {
     this.gridHelper = gridHelper;
   }
 
+  _addLiveBuildingDetails(root, type) {
+    const animatedTypes = new Set([
+      'house1', 'house2', 'tower', 'shop', 'apartment', 'clockTower',
+      'skyscraper', 'hospital', 'fireStation', 'school', 'library', 'bakery',
+      'factory', 'treeA', 'treeB', 'park', 'flowerGarden'
+    ]);
+    if (!animatedTypes.has(type)) return;
+
+    const cs = this.cellSize;
+    const base = cs * 0.85;
+    const entry = {
+      root,
+      type,
+      phase: Math.random() * Math.PI * 2,
+      windows: [],
+      rotors: [],
+      pulsers: [],
+      swayers: [],
+      clockHands: [],
+      smokeTimer: Math.random() * 0.8,
+    };
+
+    const addWindow = (x, y, z, w = cs * 0.18, h = cs * 0.16) => {
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xfff2a8,
+        emissive: 0xffcc55,
+        emissiveIntensity: 0.25 + Math.random() * 0.35,
+        roughness: 0.28,
+        metalness: 0.1,
+      });
+      const win = new THREE.Mesh(new THREE.BoxGeometry(w, h, cs * 0.025), mat);
+      win.position.set(x, y, z);
+      win.userData.baseIntensity = mat.emissiveIntensity;
+      root.add(win);
+      entry.windows.push(win);
+      return win;
+    };
+
+    const windowRowsByType = {
+      house1: 1, house2: 1, shop: 1, factory: 1, bakery: 1,
+      school: 1, library: 2, hospital: 2, fireStation: 1,
+      tower: 3, apartment: 4, clockTower: 2, skyscraper: 6,
+    };
+    const rows = windowRowsByType[type] || 0;
+    if (rows) {
+      const cols = ['tower', 'clockTower'].includes(type) ? 1 : type === 'skyscraper' ? 3 : 2;
+      for (let r = 0; r < rows; r++) {
+        const y = cs * (0.34 + r * 0.32);
+        for (let c = 0; c < cols; c++) {
+          const x = (c - (cols - 1) / 2) * cs * 0.22;
+          addWindow(x, y, base * 0.47);
+          if (rows > 1 && c % 2 === 0) addWindow(x, y, -base * 0.47);
+        }
+      }
+    }
+
+    const addRotor = (x, y, z, color = 0xdde8f0) => {
+      const rotor = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.4 });
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(cs * 0.035, cs * 0.035, cs * 0.05, 10), mat);
+      hub.rotation.x = Math.PI / 2;
+      rotor.add(hub);
+      for (let i = 0; i < 4; i++) {
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.34, cs * 0.025, cs * 0.045), mat);
+        blade.rotation.z = i * Math.PI / 2;
+        rotor.add(blade);
+      }
+      rotor.position.set(x, y, z);
+      rotor.rotation.x = Math.PI / 2;
+      root.add(rotor);
+      entry.rotors.push(rotor);
+    };
+
+    if (type === 'factory') {
+      addRotor(-base * 0.26, cs * 0.92, base * 0.5, 0xc8d2dc);
+      addRotor(base * 0.24, cs * 0.72, -base * 0.5, 0xc8d2dc);
+    }
+
+    if (['hospital', 'fireStation', 'shop', 'bakery'].includes(type)) {
+      const color = type === 'hospital' ? 0x49b8ff : type === 'fireStation' ? 0xff3048 : 0xffdd55;
+      const beacon = new THREE.Mesh(
+        new THREE.SphereGeometry(cs * 0.09, 12, 12),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.8, roughness: 0.2 })
+      );
+      beacon.position.set(base * 0.34, cs * 1.03, base * 0.34);
+      root.add(beacon);
+      entry.pulsers.push(beacon);
+    }
+
+    if (type === 'clockTower') {
+      const handMat = new THREE.MeshStandardMaterial({ color: 0x1f2933, roughness: 0.4 });
+      const minute = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.035, cs * 0.34, cs * 0.035), handMat);
+      const hour = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.045, cs * 0.23, cs * 0.035), handMat);
+      minute.position.set(0, cs * 1.72, base * 0.295);
+      hour.position.set(0, cs * 1.72, base * 0.305);
+      root.add(minute, hour);
+      entry.clockHands.push({ minute, hour });
+    }
+
+    if (['treeA', 'treeB', 'flowerGarden'].includes(type)) {
+      entry.swayers.push(root);
+    }
+
+    if (type === 'park') {
+      const water = new THREE.Mesh(
+        new THREE.TorusGeometry(cs * 0.2, cs * 0.018, 8, 24),
+        new THREE.MeshStandardMaterial({ color: 0x58bdf5, emissive: 0x1f8fd2, emissiveIntensity: 0.35, roughness: 0.2 })
+      );
+      water.position.y = cs * 0.33;
+      water.rotation.x = Math.PI / 2;
+      root.add(water);
+      entry.rotors.push(water);
+    }
+
+    this.liveBuildingParts.push(entry);
+  }
+
+  _updateLiveBuildings(dt, elapsed) {
+    for (const entry of this.liveBuildingParts) {
+      if (!entry.root.parent) continue;
+      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.4 + entry.phase);
+      for (let i = 0; i < entry.windows.length; i++) {
+        const win = entry.windows[i];
+        if (!win.material) continue;
+        const twinkle = 0.55 + 0.45 * Math.sin(elapsed * (1.3 + i * 0.07) + entry.phase + i);
+        win.material.emissiveIntensity = win.userData.baseIntensity * (0.55 + twinkle);
+      }
+      for (const rotor of entry.rotors) rotor.rotation.z += dt * (entry.type === 'park' ? 1.2 : 6.5);
+      for (const pulser of entry.pulsers) {
+        pulser.material.emissiveIntensity = 0.4 + pulse * 1.6;
+        pulser.scale.setScalar(0.85 + pulse * 0.3);
+      }
+      for (const hands of entry.clockHands) {
+        hands.minute.rotation.z -= dt * 1.8;
+        hands.hour.rotation.z -= dt * 0.16;
+      }
+      for (const swayer of entry.swayers) {
+        swayer.rotation.x = Math.sin(elapsed * 1.8 + entry.phase) * 0.025;
+        swayer.rotation.z = Math.cos(elapsed * 1.4 + entry.phase) * 0.025;
+      }
+      if (entry.type === 'factory') {
+        entry.smokeTimer -= dt;
+        if (entry.smokeTimer <= 0) {
+          const local = new THREE.Vector3(this.cellSize * 0.24, this.cellSize * 1.28, this.cellSize * 0.16);
+          const world = entry.root.localToWorld(local);
+          this._emitSmokePuff(world);
+          entry.smokeTimer = 0.35 + Math.random() * 0.35;
+        }
+      }
+      if (entry.type === 'bakery') {
+        entry.smokeTimer -= dt;
+        if (entry.smokeTimer <= 0) {
+          const world = entry.root.localToWorld(new THREE.Vector3(0, this.cellSize * 0.98, this.cellSize * 0.08));
+          this._emitSmokePuff(world, 0xfff1dc, 0.45);
+          entry.smokeTimer = 0.55 + Math.random() * 0.45;
+        }
+      }
+    }
+  }
+
+  _emitSmokePuff(position, color = 0xc8c8c8, opacity = 0.36) {
+    const mat = new THREE.MeshStandardMaterial({
+      color,
+      transparent: true,
+      opacity,
+      roughness: 1,
+      depthWrite: false,
+    });
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(this.cellSize * 0.09, 10, 10), mat);
+    puff.position.copy(position);
+    puff.castShadow = false;
+    this.scene.add(puff);
+    this.smokePuffs.push({
+      mesh: puff,
+      life: 1,
+      driftX: (Math.random() - 0.5) * this.cellSize * 0.18,
+      driftZ: (Math.random() - 0.5) * this.cellSize * 0.18,
+    });
+  }
+
+  _updateSmoke(dt) {
+    for (let i = this.smokePuffs.length - 1; i >= 0; i--) {
+      const p = this.smokePuffs[i];
+      const mesh = p.mesh || p.sprite;
+      p.life -= dt * 0.55;
+      if (p.life <= 0) {
+        this.scene.remove(mesh);
+        mesh.geometry?.dispose?.();
+        if (mesh.material?.map) mesh.material.map.dispose();
+        mesh.material?.dispose?.();
+        this.smokePuffs.splice(i, 1);
+        continue;
+      }
+      mesh.position.y += dt * this.cellSize * 0.35;
+      mesh.position.x += p.driftX * dt;
+      mesh.position.z += p.driftZ * dt;
+      const scale = 1 + (1 - p.life) * 2.2;
+      mesh.scale.setScalar(scale);
+      if (mesh.material) mesh.material.opacity = Math.max(0, p.life * 0.36);
+    }
+  }
+
   _animate() {
   this._raf = requestAnimationFrame(() => this._animate());
   const t = performance.now() * 0.001;
@@ -1086,6 +1546,18 @@ class City3DGame {
   this._lastTime = t;
   // Apply time scaling to simulation; visuals (shaders) continue real-time
   const sdt = dt * (this.timeScale || 0);
+
+  this._updateLiveBuildings(dt, t);
+  this._updateSmoke(dt);
+  this._updatePeople(sdt);
+  this._updateVisitors?.(sdt);
+  this._carSpawnTimer += sdt;
+  if (this._carSpawnTimer > 1.3 && this.cars.length < this._maxCars) {
+    const start = this._findRandomRoadStart();
+    if (start) this._spawnCar(start.row, start.col, start.dir);
+    this._carSpawnTimer = 0;
+  }
+  this._updateCars(sdt);
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -1212,10 +1684,19 @@ class City3DGame {
     const center = this._gridToWorld(col, row);
     const half = this.cellSize * 0.42;
     for (let i=0;i<count;i++){
+      const person = this._makePersonModel();
       const bodyH = this.cellSize*0.24;
-      const torso = new THREE.Mesh(new THREE.CylinderGeometry(this.cellSize*0.08, this.cellSize*0.1, bodyH, 10), new THREE.MeshStandardMaterial({ color: 0x4ba86b, roughness: 0.8 }));
-      const head = new THREE.Mesh(new THREE.SphereGeometry(this.cellSize*0.08, 12, 12), new THREE.MeshStandardMaterial({ color: 0xffe2c0 }));
-      head.position.y = bodyH*0.6; torso.add(head);
+      let torso;
+      let mixer = null;
+      if (person) {
+        torso = person.model;
+        mixer = person.mixer;
+        torso.scale.setScalar(this.cellSize * 0.028 * THREE.MathUtils.randFloat(0.9, 1.15));
+      } else {
+        torso = new THREE.Mesh(new THREE.CylinderGeometry(this.cellSize*0.08, this.cellSize*0.1, bodyH, 10), new THREE.MeshStandardMaterial({ color: 0x4ba86b, roughness: 0.8 }));
+        const head = new THREE.Mesh(new THREE.SphereGeometry(this.cellSize*0.08, 12, 12), new THREE.MeshStandardMaterial({ color: 0xffe2c0 }));
+        head.position.y = bodyH*0.6; torso.add(head);
+      }
       const startX = center.x + (Math.random()*2-1)*half*0.7;
       const startZ = center.z + (Math.random()*2-1)*half*0.7;
       const y = this.cellSize*0.05 + bodyH/2 + 0.02;
@@ -1223,7 +1704,7 @@ class City3DGame {
       torso.castShadow = true; torso.receiveShadow = true;
       this.scene.add(torso);
       const target = { x: center.x + (Math.random()*2-1)*half*0.8, z: center.z + (Math.random()*2-1)*half*0.8 };
-      this.people.push({ mesh: torso, row, col, park: parkMesh, speed: this.cellSize*(0.25+Math.random()*0.15), target, bob: Math.random()*Math.PI*2 });
+      this.people.push({ mesh: torso, row, col, park: parkMesh, speed: this.cellSize*(0.22+Math.random()*0.12), target, bob: Math.random()*Math.PI*2, baseY: y, mixer });
     }
   }
 
@@ -1231,7 +1712,8 @@ class City3DGame {
     for (let i=this.people.length-1;i>=0;i--) {
       if (this.people[i].park === parkMesh) {
         const p = this.people[i];
-        this.scene.remove(p.mesh); p.mesh.traverse(n=>{ if(n.isMesh){ n.geometry.dispose(); if(n.material.map) n.material.map.dispose(); n.material.dispose(); }});
+        this.scene.remove(p.mesh);
+        if (!p.mixer) p.mesh.traverse(n=>{ if(n.isMesh){ n.geometry.dispose(); if(n.material.map) n.material.map.dispose(); n.material.dispose(); }});
         this.people.splice(i,1);
       }
     }
@@ -1240,7 +1722,8 @@ class City3DGame {
   _updatePeople(dt) {
     for (const p of this.people) {
       // bobbing animation
-      p.bob += dt*6; p.mesh.position.y += Math.sin(p.bob)*0.002;
+      if (p.mixer) p.mixer.update(dt);
+      p.bob += dt*6; p.mesh.position.y = p.baseY + Math.sin(p.bob)*0.04;
       // move towards target
       const dx = p.target.x - p.mesh.position.x; const dz = p.target.z - p.mesh.position.z; const dist = Math.hypot(dx,dz);
       if (dist < 0.05) {
@@ -1251,6 +1734,104 @@ class City3DGame {
         const vx = (dx/dist) * p.speed * dt; const vz = (dz/dist) * p.speed * dt;
         p.mesh.position.x += vx; p.mesh.position.z += vz;
         p.mesh.rotation.y = Math.atan2(vx, vz);
+      }
+    }
+  }
+
+  _spawnVisitorsForBuilding(mesh, row, col) {
+    if (!mesh || !mesh.userData) return;
+    const type = mesh.userData.type;
+    if (['road', 'treeA', 'treeB', 'flowerGarden', 'park'].includes(type)) return;
+
+    const visitorRichTypes = new Set(['shop', 'hospital', 'fireStation', 'school', 'library', 'bakery', 'apartment', 'tower', 'clockTower']);
+    const count = visitorRichTypes.has(type) ? 2 : 1;
+    const center = this._gridToWorld(col, row);
+    const half = this.cellSize * 0.28;
+    const baseY = this.cellSize * 0.08;
+
+    for (let i = 0; i < count; i++) {
+      const person = this._makePersonModel();
+      let body;
+      let mixer = null;
+      if (person) {
+        body = person.model;
+        mixer = person.mixer;
+        body.scale.setScalar(this.cellSize * 0.026 * THREE.MathUtils.randFloat(0.95, 1.15));
+      } else {
+        body = new THREE.Mesh(
+          new THREE.CylinderGeometry(this.cellSize * 0.055, this.cellSize * 0.07, this.cellSize * 0.22, 8),
+          new THREE.MeshStandardMaterial({ color: i % 2 === 0 ? 0xf59e0b : 0x4f8cff, roughness: 0.75 })
+        );
+        const head = new THREE.Mesh(
+          new THREE.SphereGeometry(this.cellSize * 0.05, 10, 10),
+          new THREE.MeshStandardMaterial({ color: 0xf0c8a0, roughness: 0.85 })
+        );
+        head.position.y = this.cellSize * 0.13;
+        body.add(head);
+      }
+      body.position.set(
+        center.x + (Math.random() * 2 - 1) * half,
+        baseY + this.cellSize * 0.11,
+        center.z + (Math.random() * 2 - 1) * half
+      );
+      body.castShadow = true;
+      body.receiveShadow = false;
+      this.scene.add(body);
+      this.visitors.push({
+        mesh: body,
+        root: mesh,
+        row,
+        col,
+        mixer,
+        target: {
+          x: center.x + (Math.random() * 2 - 1) * half,
+          z: center.z + (Math.random() * 2 - 1) * half,
+        },
+        speed: this.cellSize * (0.12 + Math.random() * 0.08),
+        bob: Math.random() * Math.PI * 2,
+        baseY: body.position.y,
+      });
+    }
+  }
+
+  _removeVisitorsForBuilding(mesh) {
+    for (let i = this.visitors.length - 1; i >= 0; i--) {
+      if (this.visitors[i].root !== mesh) continue;
+      const visitor = this.visitors[i];
+      this.scene.remove(visitor.mesh);
+      if (!visitor.mixer) {
+        visitor.mesh.traverse?.((node) => {
+          if (!node.isMesh) return;
+          node.geometry?.dispose?.();
+          if (Array.isArray(node.material)) node.material.forEach((mat) => mat.dispose?.());
+          else node.material?.dispose?.();
+        });
+      }
+      this.visitors.splice(i, 1);
+    }
+  }
+
+  _updateVisitors(dt) {
+    for (const visitor of this.visitors) {
+      if (visitor.mixer) visitor.mixer.update(dt);
+      const center = this._gridToWorld(visitor.col, visitor.row);
+      const half = this.cellSize * 0.32;
+      visitor.bob += dt * 6;
+      visitor.mesh.position.y = visitor.baseY + Math.sin(visitor.bob) * 0.03;
+      const dx = visitor.target.x - visitor.mesh.position.x;
+      const dz = visitor.target.z - visitor.mesh.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.04) {
+        visitor.target = {
+          x: center.x + (Math.random() * 2 - 1) * half,
+          z: center.z + (Math.random() * 2 - 1) * half,
+        };
+      } else {
+        const vx = (dx / dist) * visitor.speed * dt;
+        const vz = (dz / dist) * visitor.speed * dt;
+        visitor.mesh.position.x += vx;
+        visitor.mesh.position.z += vz;
+        visitor.mesh.rotation.y = Math.atan2(vx, vz);
       }
     }
   }

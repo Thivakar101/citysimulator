@@ -32,6 +32,7 @@ export class CoCCameraController {
         return;
       }
       this.hasDragged = false;
+      this._didDragLastGesture = false;
       this._last.set(e.clientX, e.clientY);
     };
     this._onMouseMove = (e) => {
@@ -52,7 +53,13 @@ export class CoCCameraController {
       }
       this._last.set(e.clientX, e.clientY);
     };
-    this._onMouseUp = () => { this._dragging = false; this._isRotating = false; this.domElement.style.cursor = 'default'; };
+    this._onMouseUp = () => {
+      this._dragging = false;
+      this._isRotating = false;
+      this._didDragLastGesture = !!this.hasDragged;
+      this.hasDragged = false;
+      this.domElement.style.cursor = 'default';
+    };
     this._onWheel = (e) => {
       if (!this.enabled) return;
       e.preventDefault();
