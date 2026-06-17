@@ -1730,6 +1730,7 @@ class City3DGame {
     const newSize = this._getLevelGridSize(this.level);
     if (newSize <= oldSize) return;
     const newGrid = Array.from({ length: newSize }, () => Array(newSize).fill(null));
+    const offset = 0;
 
     for (let i = this.smokePuffs.length - 1; i >= 0; i--) {
       const p = this.smokePuffs[i];
@@ -1745,9 +1746,14 @@ class City3DGame {
     for (let r = 0; r < oldSize; r++) for (let c = 0; c < oldSize; c++) {
       const mesh = this.grid[r][c];
       if (!mesh) continue;
-      mesh.userData.grid = { row: r, col: c };
-      newGrid[r][c] = mesh;
-      if (mesh.userData.type === 'park') { this._removePeopleForPark(mesh); parksToRespawn.push({ mesh, row: r, col: c }); }
+      const row = r + offset;
+      const col = c + offset;
+      const pos = this._gridToWorld(col, row);
+      mesh.position.set(pos.x, mesh.position.y, pos.z);
+      mesh.userData.grid = { row, col };
+      newGrid[row][col] = mesh;
+      if (!mesh.parent) this.scene.add(mesh);
+      if (mesh.userData.type === 'park') { this._removePeopleForPark(mesh); parksToRespawn.push({ mesh, row, col }); }
     }
     this.grid = newGrid;
     this.gridSize = newSize;
@@ -1771,7 +1777,8 @@ class City3DGame {
     const half = planeSize / 2;
     const gridColors = this._getGridHelperColors();
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(planeSize, planeSize), this._getThemeMaterial('concrete', false));
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0xaeb4bb, roughness: 0.95, metalness: 0.02 });
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(planeSize, planeSize), groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(half, 0, half);
     ground.receiveShadow = true;
