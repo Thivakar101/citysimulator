@@ -76,6 +76,7 @@ export class CoCCameraController {
     this._onTouchStart = (e) => {
       if (!this.enabled) return;
       this.hasDragged = false;
+      this._didDragLastGesture = false;
       if (e.touches.length === 1) {
         const t = e.touches[0];
         this._touchState.active = true; this._touchState.last = { x: t.clientX, y: t.clientY };
@@ -105,7 +106,11 @@ export class CoCCameraController {
       }
       e.preventDefault();
     };
-    this._onTouchEnd = () => { this._touchState.active = false; };
+    this._onTouchEnd = () => {
+      this._touchState.active = false;
+      this._didDragLastGesture = !!this.hasDragged;
+      this.hasDragged = false;
+    };
 
     domElement.addEventListener('contextmenu', this._onContextMenu);
     domElement.addEventListener('mousedown', this._onMouseDown);

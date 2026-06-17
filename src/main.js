@@ -26,7 +26,7 @@ const startGame = () => {
         };
         // Monkey-patch to show cancel on selection
         const btnIds = [
-            'buyHouse1', 'buyFactory', 'buyTower', 'buyShop',
+            'buyRoad', 'buyHouse1', 'buyFactory', 'buyTower', 'buyShop',
             'buyHouse2', 'buyApartment', 'buyClockTower',
             'buySkyscraper', 'buyHospital', 'buyFireStation',
             'buySchool', 'buyLibrary', 'buyBakery',
