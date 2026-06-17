@@ -1168,11 +1168,64 @@ class City3DGame {
         break;
       }
       case 'library': {
-        const body = new THREE.Mesh(new THREE.BoxGeometry(baseSize * 0.8, cs * 1.1, baseSize * 0.8), getMat(0x1abc9c));
-        body.position.y = cs * 0.55;
-        const roof = new THREE.Mesh(new THREE.CylinderGeometry(baseSize * 0.45, baseSize * 0.45, baseSize * 0.8, 16, 1, false, 0, Math.PI), getMat(0x34495e));
-        roof.rotation.z = Math.PI / 2; roof.position.y = cs * 1.1;
-        meshes.push(body, roof, createWin(cs * 0.4, cs * 0.5, 0, cs * 0.6, baseSize * 0.4));
+        const stone = stdMat(0xd8d0bd, 0.84, 0.04);
+        const warmStone = stdMat(0xbfae8a, 0.82, 0.05);
+        const darkRoof = stdMat(0x34495e, 0.55, 0.18);
+        const bookBlue = stdMat(0x2f80ed, 0.58, 0.08);
+        const bookRed = stdMat(0xc94c4c, 0.64, 0.06);
+
+        const plinth = new THREE.Mesh(new THREE.BoxGeometry(baseSize * 0.98, cs * 0.18, baseSize * 0.88), warmStone);
+        plinth.position.y = cs * 0.09;
+        const steps1 = new THREE.Mesh(new THREE.BoxGeometry(baseSize * 0.72, cs * 0.08, cs * 0.28), stdMat(0xc8c0ad, 0.86, 0.04));
+        steps1.position.set(0, cs * 0.17, baseSize * 0.49);
+        const steps2 = new THREE.Mesh(new THREE.BoxGeometry(baseSize * 0.58, cs * 0.08, cs * 0.2), stdMat(0xddd6c6, 0.86, 0.04));
+        steps2.position.set(0, cs * 0.25, baseSize * 0.4);
+
+        const body = new THREE.Mesh(new THREE.BoxGeometry(baseSize * 0.84, cs * 1.05, baseSize * 0.68), stone);
+        body.position.y = cs * 0.78;
+        const sideWingL = new THREE.Mesh(new THREE.BoxGeometry(baseSize * 0.2, cs * 0.88, baseSize * 0.7), stdMat(0xcbbf9f, 0.84, 0.04));
+        sideWingL.position.set(-baseSize * 0.45, cs * 0.7, 0);
+        const sideWingR = sideWingL.clone();
+        sideWingR.position.x = baseSize * 0.45;
+
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(baseSize * 0.64, cs * 0.42, 4), darkRoof);
+        roof.position.y = cs * 1.5;
+        roof.rotation.y = Math.PI / 4;
+        const cornice = new THREE.Mesh(new THREE.BoxGeometry(baseSize * 0.98, cs * 0.08, baseSize * 0.82), stdMat(0x8a7b62, 0.76, 0.08));
+        cornice.position.y = cs * 1.31;
+
+        for (const x of [-baseSize * 0.3, -baseSize * 0.1, baseSize * 0.1, baseSize * 0.3]) {
+          const column = new THREE.Mesh(new THREE.CylinderGeometry(cs * 0.045, cs * 0.052, cs * 0.7, 10), stdMat(0xf1ead8, 0.82, 0.04));
+          column.position.set(x, cs * 0.62, baseSize * 0.38);
+          const cap = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.16, cs * 0.04, cs * 0.12), warmStone);
+          cap.position.set(x, cs * 0.98, baseSize * 0.38);
+          meshes.push(column, cap);
+        }
+
+        const entrance = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.24, cs * 0.5, cs * 0.05), this._getThemeMaterial('glass', ghost));
+        entrance.position.set(0, cs * 0.44, baseSize * 0.41);
+        const arch = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.34, cs * 0.12, cs * 0.06), darkRoof);
+        arch.position.set(0, cs * 0.72, baseSize * 0.43);
+
+        const glass = this._getThemeMaterial('glass', ghost);
+        for (const y of [cs * 0.62, cs * 0.95]) {
+          for (const x of [-baseSize * 0.28, baseSize * 0.28]) {
+            const win = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.16, cs * 0.18, cs * 0.045), glass);
+            win.position.set(x, y, baseSize * 0.36);
+            meshes.push(win);
+          }
+        }
+
+        const bookA = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.28, cs * 0.09, cs * 0.42), bookBlue);
+        bookA.position.set(-cs * 0.11, cs * 1.73, 0);
+        bookA.rotation.z = -0.18;
+        const bookB = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.28, cs * 0.09, cs * 0.42), bookRed);
+        bookB.position.set(cs * 0.11, cs * 1.73, 0);
+        bookB.rotation.z = 0.18;
+        const bookPage = new THREE.Mesh(new THREE.BoxGeometry(cs * 0.04, cs * 0.1, cs * 0.44), stdMat(0xf8f3df, 0.72, 0.02));
+        bookPage.position.set(0, cs * 1.76, 0);
+
+        meshes.push(plinth, steps1, steps2, body, sideWingL, sideWingR, roof, cornice, entrance, arch, bookA, bookB, bookPage);
         break;
       }
       case 'bakery': {
@@ -1389,7 +1442,7 @@ class City3DGame {
           [2.5, -2.5, -0.7, { type: 'oval', cx: 2.5, cz: -2.5, rx: 1.15, rz: 0.95, speed: 0.62 }],
         ].forEach(([x, z, ry, path], i) => person(x, z, ry, i, path));
 
-        const parkScale = (cs * 1.04) / 12;
+        const parkScale = (cs * 1.18) / 12;
         parkGroup.scale.set(parkScale, parkScale, parkScale);
         parkGroup.position.y = cs * 0.015;
         meshes.push(parkGroup);
@@ -1404,7 +1457,7 @@ class City3DGame {
     }
 
     // Facade dressing (trim bands, corner pilasters) - but not for decorative items and roads
-    if (!['road', 'factory', 'treeA', 'treeB', 'flowerGarden', 'park', 'tower', 'shop', 'apartment', 'clockTower', 'hospital', 'skyscraper'].includes(type)) {
+    if (!['road', 'factory', 'treeA', 'treeB', 'flowerGarden', 'park', 'tower', 'shop', 'apartment', 'clockTower', 'hospital', 'skyscraper', 'library'].includes(type)) {
       meshes.push(this._makeTrimMesh(baseSize * 0.92, cs * 0.05, baseSize * 0.92, 0, bodyH * 0.48, 0, 0x708090, ghost));
       meshes.push(this._makeTrimMesh(baseSize * 0.92, cs * 0.05, baseSize * 0.92, 0, bodyH * 0.72, 0, 0x8a96a6, ghost));
       meshes.push(this._makeTrimMesh(cs * 0.06, bodyH * 0.86, cs * 0.05, baseSize * 0.39, bodyH * 0.52, baseSize * 0.39, 0x8591a3, ghost));
@@ -1416,10 +1469,6 @@ class City3DGame {
       meshes.push(this._makeTrimMesh(baseSize * 0.5, cs * 0.08, baseSize * 0.28, 0, cs * 0.11, baseSize * 0.34, 0x63463a, ghost));
       meshes.push(this._makeCylinderDetail(cs * 0.08, cs * 0.09, cs * 0.28, 8, -baseSize * 0.18, cs * 0.86, -baseSize * 0.12, 0x8a6a52, ghost));
     }
-    if (['library'].includes(type)) {
-      meshes.push(this._makeTrimMesh(baseSize * 0.72, cs * 0.1, baseSize * 0.1, 0, cs * 0.18, baseSize * 0.45, 0xffffff, ghost));
-    }
-
     meshes.forEach(m => {
       if (m) { m.castShadow = !ghost; m.receiveShadow = !ghost; group.add(m); }
     });
