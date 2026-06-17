@@ -7,7 +7,7 @@ export const ASSETS = {
   house2: './house2.glb',
   apartment: './apartment.glb',
   clockTower: './clock_tower.glb',
-  skyscraper: './skyscraper.glb',
+  skyscraper: './sky.glb',
   hospital: './hospital.glb',
   fireStation: './fire_station.glb',
   school: './school.glb',

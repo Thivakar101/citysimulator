@@ -196,6 +196,13 @@
             border-color: #cbd5e1;
         }
 
+        .store-road-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
         .build-btn.house {
             background: #e7f8ed;
             border-color: #a7e8bd;
@@ -395,6 +402,15 @@
             <div class="store-title">Build</div>
             
             <button id="cancelPlacement">❌ Stop</button>
+
+            <div class="store-road-group">
+                <div class="store-level-title">Roads</div>
+                <button class="build-btn road" id="buyRoad">
+                    <span class="btn-emoji">🛣️</span>
+                    <span class="btn-label">Road</span>
+                    <span class="btn-level">All Lvls</span>
+                </button>
+            </div>
             
             <div class="store-level-group" id="lvl1Group">
                 <div class="store-level-title">Level 1</div>
