@@ -8,6 +8,8 @@ class City3DGame {
     this.gridSize = gridSize;
     this.cellSize = cellSize;
     this.baseGridSize = gridSize;
+    this.gridOriginX = 0;
+    this.gridOriginZ = 0;
 
     this.happinessPoints = 0;
     this.population = 0;
@@ -44,6 +46,8 @@ class City3DGame {
     this._roadPathLine = null;
     this._roadPathDirty = true;
     this._roadGrid = null; // Track road connectivity
+    this.levelProgressThreshold = 0.75;
+    this.levelViewMultipliers = [1.14, 1.24, 1.34, 1.44];
 
     this.buildingRegistry = {
       road: { level: 1 },
@@ -64,24 +68,7 @@ class City3DGame {
   }
 
   introCinematic() {
-    const planeSize = this.gridSize * this.cellSize;
-    const half = planeSize / 2;
-    const startDist = Math.min(80, planeSize * 1.2);
-    const endDist = Math.max(26, planeSize * 0.9);
-    const startTarget = new THREE.Vector3(half * 0.3, 0, half * 0.3);
-    const endTarget = new THREE.Vector3(half, 0, half);
-    const dur = 1400;
-    const t0 = performance.now();
-    const ease = (x) => x < 0 ? 0 : x > 1 ? 1 : (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
-    const animate = (t) => {
-      const k = ease(Math.min(1, (t - t0) / dur));
-      const tpos = startTarget.clone().lerp(endTarget, k);
-      const d = startDist + (endDist - startDist) * k;
-      this.controls.setTarget(tpos);
-      this.controls.setDistance(d);
-      if (k < 1) requestAnimationFrame(animate);
-    };
-    requestAnimationFrame(animate);
+    this._applyLevelView();
   }
 
   _initThree() {
@@ -103,12 +90,12 @@ class City3DGame {
     this.renderer.toneMappingExposure = 1.15;
     this.container.appendChild(this.renderer.domElement);
 
-    this.controls = new CoCCameraController(this.camera, this.renderer.domElement);
+    this.controls = new CoCCameraController(this.camera, this.renderer.domElement, { interactive: false });
   }
 
   _initScene() {
     const planeSize = this.gridSize * this.cellSize;
-    const half = planeSize / 2;
+    const center = this._getGridCenterWorld();
     const gridColors = this._getGridHelperColors();
 
     const ground = new THREE.Mesh(
@@ -116,13 +103,13 @@ class City3DGame {
       this._getThemeMaterial('concrete', false)
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(half, 0, half);
+    ground.position.set(center.x, 0, center.z);
     ground.receiveShadow = true;
     this.scene.add(ground);
     this.ground = ground;
 
     const gridHelper = new THREE.GridHelper(planeSize, this.gridSize, gridColors.major, gridColors.minor);
-    gridHelper.position.set(half, 0.01, half);
+    gridHelper.position.set(center.x, 0.01, center.z);
     this.scene.add(gridHelper);
     this.gridHelper = gridHelper;
 
@@ -159,9 +146,7 @@ class City3DGame {
     const sky = new THREE.Mesh(skyGeo, skyMat);
     this.scene.add(sky);
 
-    this.controls.setBounds({ minX: -4, maxX: planeSize + 4, minZ: -4, maxZ: planeSize + 4 });
-    this.controls.setTarget(new THREE.Vector3(half, 0, half));
-    this.controls.setDistance(Math.max(planeSize * 0.9, 26));
+    this._applyLevelView();
 
     this.levelTextEl = document.getElementById('levelText') || null;
     this.progressTextEl = document.getElementById('progressText') || null;
@@ -265,9 +250,14 @@ class City3DGame {
   // ─────────────────────────────────────────────
 
   _gridToWorld(col, row) {
-    const x = (col + 0.5) * this.cellSize;
-    const z = (row + 0.5) * this.cellSize;
+    const x = this.gridOriginX + (col + 0.5) * this.cellSize;
+    const z = this.gridOriginZ + (row + 0.5) * this.cellSize;
     return { x, z };
+  }
+
+  _getGridCenterWorld() {
+    const planeSize = this.gridSize * this.cellSize;
+    return new THREE.Vector3(this.gridOriginX + planeSize / 2, 0, this.gridOriginZ + planeSize / 2);
   }
 
   _getLevelGridSize(level = this.level) {
@@ -275,7 +265,7 @@ class City3DGame {
   }
 
   _getLevelProgressTarget() {
-    return this.gridSize * this.gridSize;
+    return Math.max(1, Math.ceil(this.gridSize * this.gridSize * this.levelProgressThreshold));
   }
 
   _countFilledCells() {
@@ -286,12 +276,12 @@ class City3DGame {
     return filled;
   }
 
-  _isGridFull() {
+  _hasReachedLevelThreshold() {
     return this._countFilledCells() >= this._getLevelProgressTarget();
   }
 
   _checkLevelProgression() {
-    if (this._levelTransitionPending || this.level >= this.maxLevel || !this._isGridFull()) return false;
+    if (this._levelTransitionPending || this.level >= this.maxLevel || !this._hasReachedLevelThreshold()) return false;
     this.level++;
     this.happinessPoints += 25;
     this._feed(`Level up! ${this.level}`);
@@ -302,11 +292,54 @@ class City3DGame {
     return true;
   }
 
+  _getLevelViewDistance(level = this.level) {
+    const planeSize = this.gridSize * this.cellSize;
+    const baseDistance = Math.max(planeSize * 0.9, 26);
+    const multiplier = this.levelViewMultipliers[Math.max(0, Math.min(this.levelViewMultipliers.length - 1, level - 1))] ?? 1;
+    return baseDistance * multiplier;
+  }
+
+  _applyLevelView(animate = false) {
+    if (!this.controls) return;
+    const planeSize = this.gridSize * this.cellSize;
+    const center = this._getGridCenterWorld();
+    const targetDistance = this._getLevelViewDistance();
+
+    this.controls.setBounds({
+      minX: this.gridOriginX - 4,
+      maxX: this.gridOriginX + planeSize + 4,
+      minZ: this.gridOriginZ - 4,
+      maxZ: this.gridOriginZ + planeSize + 4
+    });
+    this.controls.setTarget(center);
+    if (!animate) {
+      this.controls.setDistance(targetDistance);
+      return;
+    }
+
+    const startDistance = this.controls.distance;
+    const delta = targetDistance - startDistance;
+    if (Math.abs(delta) < 0.01) {
+      this.controls.setDistance(targetDistance);
+      return;
+    }
+
+    const duration = 700;
+    const startedAt = performance.now();
+    const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+    const tick = (now) => {
+      const t = Math.min(1, (now - startedAt) / duration);
+      this.controls.setDistance(startDistance + delta * easeOut(t));
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
   _getGridHelperColors() { return { major: 0x64707d, minor: 0x92a0ac }; }
 
   _worldToGrid(x, z) {
-    const col = Math.floor(x / this.cellSize);
-    const row = Math.floor(z / this.cellSize);
+    const col = Math.floor((x - this.gridOriginX) / this.cellSize);
+    const row = Math.floor((z - this.gridOriginZ) / this.cellSize);
     if (col < 0 || row < 0 || col >= this.gridSize || row >= this.gridSize) return null;
     return { col, row };
   }
@@ -1779,7 +1812,9 @@ class City3DGame {
     const newSize = this._getLevelGridSize(this.level);
     if (newSize <= oldSize) return;
     const newGrid = Array.from({ length: newSize }, () => Array(newSize).fill(null));
-    const offset = 0;
+    const offset = Math.floor((newSize - oldSize) / 2);
+    this.gridOriginX -= offset * this.cellSize;
+    this.gridOriginZ -= offset * this.cellSize;
 
     for (let i = this.smokePuffs.length - 1; i >= 0; i--) {
       const p = this.smokePuffs[i];
@@ -1808,12 +1843,7 @@ class City3DGame {
     this.gridSize = newSize;
     this._rebuildGroundAndGrid();
     for (const p of parksToRespawn) this._spawnPeopleForPark(p.mesh, p.row, p.col);
-
-    const planeSize = this.gridSize * this.cellSize;
-    const half = planeSize / 2;
-    this.controls.setBounds({ minX: -4, maxX: planeSize + 4, minZ: -4, maxZ: planeSize + 4 });
-    this.controls.setTarget(new THREE.Vector3(half, 0, half));
-    this.controls.setDistance(Math.max(planeSize * 0.9, 26));
+    this._applyLevelView(true);
     this._recomputeCityStats();
     this._markRoadPathDirty();
   }
@@ -1823,19 +1853,19 @@ class City3DGame {
     if (this.ground) { this.scene.remove(this.ground); this.ground.geometry.dispose(); this.ground.material.dispose(); this.ground = null; }
 
     const planeSize = this.gridSize * this.cellSize;
-    const half = planeSize / 2;
+    const center = this._getGridCenterWorld();
     const gridColors = this._getGridHelperColors();
 
     const groundMat = new THREE.MeshStandardMaterial({ color: 0xaeb4bb, roughness: 0.95, metalness: 0.02 });
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(planeSize, planeSize), groundMat);
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(half, 0, half);
+    ground.position.set(center.x, 0, center.z);
     ground.receiveShadow = true;
     this.scene.add(ground);
     this.ground = ground;
 
     const gridHelper = new THREE.GridHelper(planeSize, this.gridSize, gridColors.major, gridColors.minor);
-    gridHelper.position.set(half, 0.01, half);
+    gridHelper.position.set(center.x, 0.01, center.z);
     this.scene.add(gridHelper);
     this.gridHelper = gridHelper;
   }

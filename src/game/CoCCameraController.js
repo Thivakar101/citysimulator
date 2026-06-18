@@ -2,10 +2,11 @@ import * as THREE from 'three';
 
 // Clash-of-Clans style camera controller: left-drag to pan, wheel to zoom, fixed tilt and yaw
 export class CoCCameraController {
-  constructor(camera, domElement) {
+  constructor(camera, domElement, { interactive = true } = {}) {
     this.camera = camera;
     this.domElement = domElement;
     this.enabled = true;
+    this.interactive = interactive;
     this.pitch = THREE.MathUtils.degToRad(55); // fixed tilt
     this.yaw = -Math.PI / 4; // isometric yaw
     this.distance = 40; // starting distance
@@ -23,7 +24,7 @@ export class CoCCameraController {
 
     // Mouse events
     this._onMouseDown = (e) => {
-      if (!this.enabled) return;
+      if (!this.enabled || !this.interactive) return;
       if (e.button === 0) {
         this._dragging = true;
         this._isRotating = false;
@@ -39,7 +40,7 @@ export class CoCCameraController {
       this._last.set(e.clientX, e.clientY);
     };
     this._onMouseMove = (e) => {
-      if (!this.enabled) return;
+      if (!this.enabled || !this.interactive) return;
       if (!this._dragging && !this._isRotating) return;
       const dx = e.clientX - this._last.x;
       const dy = e.clientY - this._last.y;
@@ -64,7 +65,7 @@ export class CoCCameraController {
       this.domElement.style.cursor = 'default';
     };
     this._onWheel = (e) => {
-      if (!this.enabled) return;
+      if (!this.enabled || !this.interactive) return;
       e.preventDefault();
       const factor = Math.exp(e.deltaY * this.zoomSpeed);
       this.setDistance(this.distance * factor);
@@ -74,7 +75,7 @@ export class CoCCameraController {
     // Touch: one finger pan, two finger pinch zoom
     this._touchState = { active: false, last: null, pinchDist: 0 };
     this._onTouchStart = (e) => {
-      if (!this.enabled) return;
+      if (!this.enabled || !this.interactive) return;
       this.hasDragged = false;
       this._didDragLastGesture = false;
       if (e.touches.length === 1) {
@@ -86,7 +87,7 @@ export class CoCCameraController {
       }
     };
     this._onTouchMove = (e) => {
-      if (!this.enabled) return;
+      if (!this.enabled || !this.interactive) return;
       if (e.touches.length === 1 && this._touchState.active) {
         const t = e.touches[0];
         const dx = t.clientX - this._touchState.last.x;
@@ -137,6 +138,7 @@ export class CoCCameraController {
   setTarget(v3) { this.target.copy(v3); this._updateCamera(); }
   setDistance(d) { this.distance = THREE.MathUtils.clamp(d, this.minDistance, this.maxDistance); this._updateCamera(); }
   setBounds(b) { this.bounds = { ...this.bounds, ...b }; this._clampTarget(); this._updateCamera(); }
+  setInteractive(interactive) { this.interactive = !!interactive; }
 
   _touchDistance(a, b) { const dx = a.clientX - b.clientX; const dy = a.clientY - b.clientY; return Math.hypot(dx, dy); }
 
