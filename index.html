@@ -274,7 +274,18 @@
             border-color: #b7e986;
         }
 
-        #cancelPlacement {
+        #placementControls {
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #placementControls.visible {
+            display: flex;
+        }
+
+        #cancelPlacement,
+        #rotatePlacement {
             background: #fff1f2;
             border: 2px solid #fecdd3;
             border-radius: 12px;
@@ -285,16 +296,25 @@
             padding: 9px 8px;
             cursor: pointer;
             transition: transform 0.1s ease;
-            display: none;
-            /* hidden until placement starts */
+            touch-action: manipulation;
         }
 
-        #cancelPlacement:hover {
+        #rotatePlacement {
+            background: #eff6ff;
+            border-color: #bfdbfe;
+            color: #1d4ed8;
+        }
+
+        #cancelPlacement:hover,
+        #rotatePlacement:hover {
             transform: scale(1.05);
         }
 
-        #cancelPlacement.visible {
+        #rotatePlacement .hint {
             display: block;
+            font-size: 10px;
+            opacity: 0.75;
+            margin-top: 2px;
         }
 
         .store-level-group {
@@ -510,11 +530,16 @@
                 padding: 1px 5px;
             }
 
-            #cancelPlacement {
+            #cancelPlacement,
+            #rotatePlacement {
                 flex: 0 0 62px;
                 min-height: 62px;
                 font-size: 12px;
                 padding: 7px 5px;
+            }
+
+            #rotatePlacement .hint {
+                font-size: 9px;
             }
 
             #buildingActionMenu {
@@ -544,10 +569,15 @@
             }
 
             .build-btn,
-            #cancelPlacement {
+            #cancelPlacement,
+            #rotatePlacement {
                 flex-basis: 56px;
                 min-width: 56px;
                 min-height: 56px;
+            }
+
+            #rotatePlacement .hint {
+                display: none;
             }
 
             .build-btn .btn-emoji {
@@ -591,6 +621,8 @@
             <div class="hud-sep"></div>
             <div class="hud-stat"><span class="emoji">😊</span> <span id="happyText">100%</span></div>
             <div class="hud-controls">
+                <button class="hud-zoom-btn" id="rotateViewLeft" type="button" aria-label="Rotate view left">↺</button>
+                <button class="hud-zoom-btn" id="rotateViewRight" type="button" aria-label="Rotate view right">↻</button>
                 <button class="hud-zoom-btn" id="zoomOut" type="button" aria-label="Zoom out">-</button>
                 <button class="hud-zoom-btn" id="zoomIn" type="button" aria-label="Zoom in">+</button>
             </div>
@@ -600,7 +632,13 @@
         <div id="store">
             <div class="store-title">Build</div>
             
-            <button id="cancelPlacement">❌ Stop</button>
+            <div id="placementControls" aria-label="Placement controls">
+                <button id="rotatePlacement" type="button" aria-label="Rotate building">
+                    🔄 Rotate
+                    <span class="hint">Tap or press R</span>
+                </button>
+                <button id="cancelPlacement" type="button">❌ Stop</button>
+            </div>
 
             <div class="store-road-group">
                 <div class="store-level-title">Roads</div>

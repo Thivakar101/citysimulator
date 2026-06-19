@@ -138,6 +138,15 @@ export function installSetupMethods(City3DGame) {
       if (this.ui.cancelPlacement) {
         this.ui.cancelPlacement.addEventListener('click', () => this._cancelPlacement());
       }
+      if (this.ui.rotatePlacement) {
+        this.ui.rotatePlacement.addEventListener('click', () => this._rotatePlacementClockwise());
+      }
+      if (this.ui.rotateViewLeft) {
+        this.ui.rotateViewLeft.addEventListener('click', () => this.controls?.rotateYaw(Math.PI / 4));
+      }
+      if (this.ui.rotateViewRight) {
+        this.ui.rotateViewRight.addEventListener('click', () => this.controls?.rotateYaw(-Math.PI / 4));
+      }
       if (this.ui.zoomIn) {
         this.ui.zoomIn.addEventListener('click', () => this.zoomIn());
       }
@@ -404,8 +413,8 @@ export function installSetupMethods(City3DGame) {
     },
 
     _setPlacementUiActive(isActive) {
-      if (this.ui.cancelPlacement) {
-        this.ui.cancelPlacement.classList.toggle('visible', !!isActive);
+      if (this.ui.placementControls) {
+        this.ui.placementControls.classList.toggle('visible', !!isActive);
       }
     },
 

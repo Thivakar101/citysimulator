@@ -328,12 +328,19 @@ export function installPlacementMethods(City3DGame) {
       return BUILDING_LABELS[type] || type;
     },
 
+    _rotatePlacementClockwise() {
+      if (!this.currentPlacement && !this.isRelocating) {
+        return;
+      }
+      this.placementRotation += Math.PI / 2;
+      if (this.ghost) {
+        this.ghost.rotation.y = this.placementRotation;
+      }
+    },
+
     _onKeyDown(event) {
       if (event.key === 'r' || event.key === 'R') {
-        this.placementRotation += Math.PI / 2;
-        if (this.ghost) {
-          this.ghost.rotation.y = this.placementRotation;
-        }
+        this._rotatePlacementClockwise();
       }
       if (event.key === 'Escape') {
         this._cancelPlacement();

@@ -139,6 +139,7 @@ export class CoCCameraController {
   setDistance(d) { this.distance = THREE.MathUtils.clamp(d, this.minDistance, this.maxDistance); this._updateCamera(); }
   setBounds(b) { this.bounds = { ...this.bounds, ...b }; this._clampTarget(); this._updateCamera(); }
   setInteractive(interactive) { this.interactive = !!interactive; }
+  rotateYaw(delta) { this.yaw += delta; this._updateCamera(); }
 
   _touchDistance(a, b) { const dx = a.clientX - b.clientX; const dy = a.clientY - b.clientY; return Math.hypot(dx, dy); }
 
