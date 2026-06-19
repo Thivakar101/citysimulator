@@ -137,6 +137,12 @@ export class CoCCameraController {
 
   setTarget(v3) { this.target.copy(v3); this._updateCamera(); }
   setDistance(d) { this.distance = THREE.MathUtils.clamp(d, this.minDistance, this.maxDistance); this._updateCamera(); }
+  setDistanceLimits({ minDistance = this.minDistance, maxDistance = this.maxDistance } = {}) {
+    this.minDistance = minDistance;
+    this.maxDistance = Math.max(maxDistance, this.minDistance);
+    this.distance = THREE.MathUtils.clamp(this.distance, this.minDistance, this.maxDistance);
+    this._updateCamera();
+  }
   setBounds(b) { this.bounds = { ...this.bounds, ...b }; this._clampTarget(); this._updateCamera(); }
   setInteractive(interactive) { this.interactive = !!interactive; }
   rotateYaw(delta) { this.yaw += delta; this._updateCamera(); }

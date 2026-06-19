@@ -292,7 +292,9 @@ export function installSetupMethods(City3DGame) {
       const planeSize = this.gridSize * this.cellSize;
       const center = this._getGridCenterWorld();
       const targetDistance = this._getLevelViewDistance();
+      const maxDistance = Math.max(targetDistance * 1.8, planeSize * 4.5, 160);
 
+      this.controls.setDistanceLimits({ maxDistance });
       this.controls.setBounds({
         minX: this.gridOriginX - 4,
         maxX: this.gridOriginX + planeSize + 4,
