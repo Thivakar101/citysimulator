@@ -48,6 +48,10 @@ class City3DGame {
     this._roadGrid = null; // Track road connectivity
     this.levelProgressThreshold = 0.75;
     this.levelViewMultipliers = [1.14, 1.24, 1.34, 1.44];
+    this.maxPlacementsPerType = 10;
+    this.longPressDuration = 550;
+    this._longPressState = { timer: null, pointerId: null, startX: 0, startY: 0, target: null, active: false };
+    this.selectedBuilding = null;
 
     this.buildingRegistry = {
       road: { level: 1 },
@@ -61,6 +65,7 @@ class City3DGame {
     this._initScene();
     this._bootstrapSurfaceThemes();
     this._bootstrapPersonAsset();
+    this._loadAsset('house1').catch(() => null);
     this._animate();
     this._updateUI();
     this._bindResize();
@@ -90,7 +95,7 @@ class City3DGame {
     this.renderer.toneMappingExposure = 1.15;
     this.container.appendChild(this.renderer.domElement);
 
-    this.controls = new CoCCameraController(this.camera, this.renderer.domElement, { interactive: false });
+    this.controls = new CoCCameraController(this.camera, this.renderer.domElement, { interactive: true });
   }
 
   _initScene() {
@@ -172,7 +177,13 @@ class City3DGame {
       buyTreeB: document.getElementById('buyTreeB'),
       buyFlowerGarden: document.getElementById('buyFlowerGarden'),
       buyPark: document.getElementById('buyPark'),
-      cancelPlacement: document.getElementById('cancelPlacement')
+      cancelPlacement: document.getElementById('cancelPlacement'),
+      zoomIn: document.getElementById('zoomIn'),
+      zoomOut: document.getElementById('zoomOut'),
+      buildingActionMenu: document.getElementById('buildingActionMenu'),
+      moveBuildingBtn: document.getElementById('moveBuildingBtn'),
+      removeBuildingBtn: document.getElementById('removeBuildingBtn'),
+      cancelBuildingActionBtn: document.getElementById('cancelBuildingActionBtn')
     };
 
     const getHappyBtn = document.getElementById('getHappinessBtn');
@@ -204,10 +215,20 @@ class City3DGame {
     this._hookStore('buyPark', { type: 'park', cost: 50, isDecoration: true });
 
     if (this.ui.cancelPlacement) this.ui.cancelPlacement.addEventListener('click', () => this._cancelPlacement());
+    if (this.ui.zoomIn) this.ui.zoomIn.addEventListener('click', () => this.zoomIn());
+    if (this.ui.zoomOut) this.ui.zoomOut.addEventListener('click', () => this.zoomOut());
+    if (this.ui.moveBuildingBtn) this.ui.moveBuildingBtn.addEventListener('click', () => this._beginMoveSelectedBuilding());
+    if (this.ui.removeBuildingBtn) this.ui.removeBuildingBtn.addEventListener('click', () => this._removeSelectedBuilding());
+    if (this.ui.cancelBuildingActionBtn) this.ui.cancelBuildingActionBtn.addEventListener('click', () => this._hideBuildingActionMenu());
 
     this.renderer.domElement.addEventListener('mousemove', (e) => this._onPointerMove(e));
     this.renderer.domElement.addEventListener('click', (e) => this._onClick(e));
     this.renderer.domElement.addEventListener('dblclick', (e) => this._onDoubleClick(e));
+    this.renderer.domElement.addEventListener('pointerdown', (e) => this._onPointerDown(e));
+    this.renderer.domElement.addEventListener('pointermove', (e) => this._onPointerDragMove(e));
+    this.renderer.domElement.addEventListener('pointerup', () => this._clearLongPress());
+    this.renderer.domElement.addEventListener('pointercancel', () => this._clearLongPress());
+    this.renderer.domElement.addEventListener('pointerleave', () => this._clearLongPress());
     window.addEventListener('keydown', (e) => this._onKeyDown(e));
   }
 
@@ -296,7 +317,12 @@ class City3DGame {
     const planeSize = this.gridSize * this.cellSize;
     const baseDistance = Math.max(planeSize * 0.9, 26);
     const multiplier = this.levelViewMultipliers[Math.max(0, Math.min(this.levelViewMultipliers.length - 1, level - 1))] ?? 1;
-    return baseDistance * multiplier;
+    const mobileBoost = this._isMobileViewport() ? 2.5 : 1;
+    return baseDistance * multiplier * mobileBoost;
+  }
+
+  _isMobileViewport() {
+    return window.matchMedia('(max-width: 900px), (pointer: coarse)').matches;
   }
 
   _applyLevelView(animate = false) {
@@ -352,11 +378,16 @@ class City3DGame {
     const el = this.ui[id];
     if (!el) return;
     el.addEventListener('click', () => {
+      if (!this._canPlaceType(placement.type)) {
+        this._toastAtCell(Math.floor(this.gridSize / 2), Math.floor(this.gridSize / 2), `${this._getLabelForType(placement.type)} is full`);
+        return;
+      }
       const reg = this.buildingRegistry[placement.type];
       if (reg && reg.level > this.level) {
         this._toastAtCell(Math.floor(this.gridSize / 2), Math.floor(this.gridSize / 2), `🔒 Unlock at Level ${reg.level}!`);
         return;
       }
+      this._hideBuildingActionMenu();
       this.currentPlacement = placement;
       this.isRelocating = null;
       this._ensureGhost(placement.type);
@@ -413,8 +444,16 @@ class City3DGame {
   }
 
   _onClick(event) {
+    if (this._longPressState.active) {
+      this._longPressState.active = false;
+      return;
+    }
     if (this.controls && this.controls._didDragLastGesture) {
       this.controls._didDragLastGesture = false;
+      return;
+    }
+    if (this.selectedBuilding) {
+      this._hideBuildingActionMenu();
       return;
     }
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -463,6 +502,10 @@ class City3DGame {
     if (!this.currentPlacement) return;
     const reg = this.buildingRegistry[this.currentPlacement.type];
     if (reg && reg.level > this.level) { this._toastAtCell(row, col, `Unlock at Level ${reg.level}!`); return; }
+    if (!this._canPlaceType(this.currentPlacement.type)) {
+      this._toastAtCell(row, col, `${this._getLabelForType(this.currentPlacement.type)} limit reached`);
+      return;
+    }
     if (this.grid[row][col]) return;
     if (this.currentPlacement.isDecoration && this.happinessPoints < this.currentPlacement.cost) {
       this._toastAtCell(row, col, "Not enough Happiness Points!");
@@ -500,26 +543,136 @@ class City3DGame {
   }
 
   _onDoubleClick(event) {
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersects = this.raycaster.intersectObjects(this.buildings, false);
-    if (intersects.length > 0) {
-      this.isRelocating = intersects[0].object;
-      this.currentPlacement = null;
-      this._ensureGhost(this.isRelocating.userData.type);
-      this.placementRotation = this.isRelocating.userData.type === 'road'
-        ? (this.isRelocating.userData.roadRotation ?? 0)
-        : this.isRelocating.rotation.y;
-      if (this.ghost) this.ghost.rotation.y = this.placementRotation;
-    }
+    this._openBuildingActionMenu(this._getBuildingFromEvent(event));
   }
 
   _cancelPlacement() {
     this.currentPlacement = null;
     this.isRelocating = null;
     if (this.ghost) { this.scene.remove(this.ghost); this.ghost = null; }
+    this._hideBuildingActionMenu();
+  }
+
+  _onPointerDown(event) {
+    if (this.currentPlacement || this.isRelocating || this.selectedBuilding) return;
+    const target = this._getBuildingFromEvent(event);
+    if (!target) return;
+    this._clearLongPress();
+    this._longPressState.pointerId = event.pointerId;
+    this._longPressState.startX = event.clientX;
+    this._longPressState.startY = event.clientY;
+    this._longPressState.target = target;
+    this._longPressState.timer = setTimeout(() => {
+      this._longPressState.active = true;
+      this._openBuildingActionMenu(target);
+    }, this.longPressDuration);
+  }
+
+  _onPointerDragMove(event) {
+    const state = this._longPressState;
+    if (!state.timer || state.pointerId !== event.pointerId) return;
+    if (Math.hypot(event.clientX - state.startX, event.clientY - state.startY) > 8) {
+      this._clearLongPress();
+    }
+  }
+
+  _clearLongPress() {
+    const state = this._longPressState;
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = null;
+    state.pointerId = null;
+    state.target = null;
+    state.active = false;
+  }
+
+  _getBuildingFromEvent(event) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const intersects = this.raycaster.intersectObjects(this.buildings, true);
+    if (!intersects.length) return null;
+    let obj = intersects[0].object;
+    while (obj && !this.buildings.includes(obj)) obj = obj.parent;
+    return obj || null;
+  }
+
+  _openBuildingActionMenu(mesh) {
+    this._clearLongPress();
+    if (!mesh) return;
+    this.selectedBuilding = mesh;
+    if (this.ui.buildingActionMenu) this.ui.buildingActionMenu.classList.add('visible');
+  }
+
+  _hideBuildingActionMenu() {
+    this.selectedBuilding = null;
+    if (this.ui.buildingActionMenu) this.ui.buildingActionMenu.classList.remove('visible');
+  }
+
+  _beginMoveSelectedBuilding() {
+    if (!this.selectedBuilding) return;
+    this.isRelocating = this.selectedBuilding;
+    this.currentPlacement = null;
+    this._ensureGhost(this.isRelocating.userData.type);
+    this.placementRotation = this.isRelocating.userData.type === 'road'
+      ? (this.isRelocating.userData.roadRotation ?? 0)
+      : this.isRelocating.rotation.y;
+    if (this.ghost) this.ghost.rotation.y = this.placementRotation;
+    this._hideBuildingActionMenu();
+  }
+
+  _removeSelectedBuilding() {
+    if (!this.selectedBuilding) return;
+    const mesh = this.selectedBuilding;
+    const pos = mesh.userData?.grid;
+    if (pos) this.grid[pos.row][pos.col] = null;
+    this._removePeopleForPark(mesh);
+    this._removeVisitorsForBuilding(mesh);
+    this.scene.remove(mesh);
+    this.buildings = this.buildings.filter((b) => b !== mesh);
+    this.liveBuildingParts = this.liveBuildingParts.filter((entry) => entry.root !== mesh);
+    if (mesh.userData?.type === 'road' && pos) this._refreshRoadNetworkAround(pos.row, pos.col);
+    this._hideBuildingActionMenu();
+    this._recomputeCityStats();
+    this._updateUI();
+    this._feed(`Removed ${mesh.userData?.type || 'building'}`);
+  }
+
+  _getPlacedCount(type) {
+    return this.buildings.filter((mesh) => mesh?.userData?.type === type).length;
+  }
+
+  _getRemainingStock(type) {
+    if (type === 'road') return Infinity;
+    return Math.max(0, this.maxPlacementsPerType - this._getPlacedCount(type));
+  }
+
+  _canPlaceType(type) {
+    return this._getRemainingStock(type) > 0;
+  }
+
+  _getLabelForType(type) {
+    const map = {
+      road: 'Road',
+      house1: 'House 1',
+      factory: 'Factory',
+      tower: 'Tower',
+      shop: 'Shop',
+      house2: 'House 2',
+      apartment: 'Apartment',
+      clockTower: 'Clock Tower',
+      skyscraper: 'Skyscraper',
+      hospital: 'Hospital',
+      fireStation: 'Fire Station',
+      school: 'School',
+      library: 'Library',
+      bakery: 'Bakery',
+      treeA: 'Tree A',
+      treeB: 'Tree B',
+      flowerGarden: 'Garden',
+      park: 'Park'
+    };
+    return map[type] || type;
   }
 
   _onKeyDown(e) {
@@ -543,9 +696,9 @@ class City3DGame {
     const mesh = new THREE.Group();
     mesh.userData.assetType = type;
 
-    const procedural = this._buildProceduralFallback(type, ghost, opts);
+    const procedural = type === 'house1' ? null : this._buildProceduralFallback(type, ghost, opts);
     mesh.userData.proceduralRoot = procedural;
-    mesh.add(procedural);
+    if (procedural) mesh.add(procedural);
 
     if (type !== 'factory' && type !== 'park' && type !== 'road') {
       this._loadAsset(type)
@@ -554,11 +707,11 @@ class City3DGame {
           const model = assetScene.clone(true);
           model.name = `${type} asset`;
           this._prepareAssetModel(model, ghost, type);
-          mesh.remove(procedural);
+          if (procedural) mesh.remove(procedural);
           mesh.add(model);
         })
         .catch((err) => {
-          console.warn(`Could not load asset for ${type}, keeping procedural fallback.`, err.message);
+          console.warn(`Could not load asset for ${type}${procedural ? ', keeping procedural fallback.' : '.'}`, err.message);
         });
     }
 
@@ -574,6 +727,16 @@ class City3DGame {
       this._addLiveBuildingDetails(mesh, type);
     }
     return mesh;
+  }
+
+  zoomIn(step = 0.88) {
+    if (!this.controls) return;
+    this.controls.setDistance(this.controls.distance * step);
+  }
+
+  zoomOut(step = 1.12) {
+    if (!this.controls) return;
+    this.controls.setDistance(this.controls.distance * step);
   }
 
   // ─────────────────────────────────────────────
@@ -1738,21 +1901,62 @@ class City3DGame {
     if (this.happyPointsTextEl) this.happyPointsTextEl.textContent = `${this.happinessPoints}`;
     if (this.happyTextEl) this.happyTextEl.textContent = `${Math.round(this.happiness * 100)}%`;
 
+    document.querySelectorAll('[data-stock-for]').forEach((stockEl) => {
+      const type = stockEl.getAttribute('data-stock-for');
+      if (!type) return;
+      stockEl.textContent = `${this._getRemainingStock(type)} left`;
+    });
+
     for (let lvl = 1; lvl <= this.maxLevel; lvl++) {
       const group = document.getElementById(`lvl${lvl}Group`);
       if (!group) continue;
       group.style.display = 'flex';
       group.querySelectorAll('.build-btn').forEach(btn => {
-        if (lvl > this.level) {
+        const buildType = Object.entries(this.ui).find(([, el]) => el === btn)?.[0];
+        const typeMap = {
+          buyHouse1: 'house1', buyFactory: 'factory', buyTower: 'tower', buyShop: 'shop',
+          buyHouse2: 'house2', buyApartment: 'apartment', buyClockTower: 'clockTower',
+          buySkyscraper: 'skyscraper', buyHospital: 'hospital', buyFireStation: 'fireStation',
+          buySchool: 'school', buyLibrary: 'library', buyBakery: 'bakery'
+        };
+        const type = typeMap[buildType];
+        const outOfStock = type ? !this._canPlaceType(type) : false;
+        const overlayText = lvl > this.level ? `🔒 Lvl ${lvl}` : (outOfStock ? 'Full' : null);
+
+        if (lvl > this.level || outOfStock) {
           btn.disabled = true; btn.classList.add('locked');
-          if (!btn.querySelector('.lock-overlay')) {
-            const lock = document.createElement('span'); lock.className = 'lock-overlay'; lock.textContent = '🔒 Lvl ' + lvl; btn.appendChild(lock);
-          }
+          const lock = btn.querySelector('.lock-overlay') || document.createElement('span');
+          lock.className = 'lock-overlay';
+          lock.textContent = overlayText;
+          if (!lock.parentElement) btn.appendChild(lock);
         } else {
           btn.disabled = false; btn.classList.remove('locked');
           const lock = btn.querySelector('.lock-overlay'); if (lock) lock.remove();
         }
       });
+    }
+
+    const miscButtons = {
+      buyTreeA: 'treeA',
+      buyTreeB: 'treeB',
+      buyFlowerGarden: 'flowerGarden',
+      buyPark: 'park'
+    };
+    for (const [id, type] of Object.entries(miscButtons)) {
+      const btn = this.ui[id];
+      if (!btn) continue;
+      const outOfStock = !this._canPlaceType(type);
+      btn.disabled = outOfStock;
+      btn.classList.toggle('locked', outOfStock);
+      const existing = btn.querySelector('.lock-overlay');
+      if (outOfStock) {
+        const lock = existing || document.createElement('span');
+        lock.className = 'lock-overlay';
+        lock.textContent = 'Full';
+        if (!lock.parentElement) btn.appendChild(lock);
+      } else if (existing) {
+        existing.remove();
+      }
     }
   }
 
