@@ -328,58 +328,8 @@ export function installSimulationMethods(City3DGame) {
           entry.parkAnimData.people.push(child);
         }
       });
-
-      const addWindow = (x, y, z, width = this.cellSize * 0.18, height = this.cellSize * 0.16) => {
-        const material = new THREE.MeshStandardMaterial({
-          color: 0xfff2a8,
-          emissive: 0xffcc55,
-          emissiveIntensity: 0.25 + Math.random() * 0.35,
-          roughness: 0.28,
-          metalness: 0.1,
-        });
-        const windowMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(width, height, this.cellSize * 0.025),
-          material
-        );
-        windowMesh.position.set(x, y, z);
-        windowMesh.userData.baseIntensity = material.emissiveIntensity;
-        proceduralChild.add(windowMesh);
-        entry.windows.push(windowMesh);
-      };
-
-      const windowRowsByType = {
-        house1: 1,
-        house2: 1,
-        shop: 2,
-        factory: 1,
-        bakery: 1,
-        school: 2,
-        library: 2,
-        hospital: 2,
-        fireStation: 1,
-        tower: 3,
-        apartment: 4,
-        clockTower: 2,
-      };
-
-      const skipOverlayWindows =
-        type === 'house1' &&
-        root.userData?.assetType === 'house1' &&
-        !root.userData?.proceduralRoot;
-      const rows = skipOverlayWindows ? 0 : (windowRowsByType[type] || 0);
-      if (rows) {
-        const cols = ['tower', 'clockTower'].includes(type) ? 1 : type === 'skyscraper' ? 3 : 2;
-        for (let row = 0; row < rows; row++) {
-          const y = this.cellSize * (0.34 + row * 0.32);
-          for (let col = 0; col < cols; col++) {
-            const x = (col - (cols - 1) / 2) * this.cellSize * 0.22;
-            addWindow(x, y, base * 0.47);
-            if (rows > 1 && col % 2 === 0) {
-              addWindow(x, y, -base * 0.47);
-            }
-          }
-        }
-      }
+      // Decorative overlay windows are intentionally disabled so component
+      // meshes render without the extra glowing yellow cube layer.
 
       if (['hospital', 'shop', 'bakery'].includes(type)) {
         const color = type === 'hospital' ? 0x49b8ff : 0xffdd55;
